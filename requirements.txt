@@ -1,0 +1,19 @@
+# Core / Data Handling
+pydantic>=2.5.0
+PyYAML>=6.0.1
+
+# OCR e PDFs
+PyMuPDF>=1.23.0    # aka fitz (renderiza páginas em imagens nativamente sem Poppler)
+pytesseract>=0.3.10
+Pillow>=10.2.0
+# [LEGACY]: pdf2image>=1.17.0 (removido para dispensar instalação do Poppler no Windows)
+
+# Gemini API
+google-genai>=2.3.0
+
+# Automacao Web
+selenium>=4.18.0
+
+# Interface Gráfica
+PySide6>=6.6.2
+PySide6-Fluent-Widgets>=1.6.0

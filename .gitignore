@@ -1,0 +1,34 @@
+# Ambientes virtuais e cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.env
+.venv/
+venv/
+ENV/
+
+# Dados locais do DocFiller (Proteção LGPD e Chaves de API)
+data/
+*.db
+*.sqlite3
+settings.json
+
+# Binários e Builds (PyInstaller & Inno Setup)
+build/
+dist/
+installer_output/
+*.exe
+
+# Binários de terceiros incorporados (Tesseract portátil)
+bin/
+
+# Logs e arquivos de depuração
+*.log
+.system_generated/
+scratch/
+
+# IDE e editores
+.vscode/
+.idea/
+*.swp
+*.swo

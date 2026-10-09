@@ -1,0 +1,44 @@
+site:
+  name: "Site Governamental (Exemplo)"
+  description: "Exemplo de preenchimento para um formulário base"
+  # O domínio ajuda o gerenciador de sessão a saber onde injetar os cookies
+  domain: "https://exemplo-governo.gov.br"
+
+steps:
+  # 1. Navegar para a página do formulário
+  - type: "navigate"
+    name: "Abrir página de cadastro"
+    url: "https://exemplo-governo.gov.br/cadastro"
+
+  # 2. Preencher os dados usando as chaves desmascaradas
+  - type: "fill"
+    name: "Preencher dados pessoais"
+    fields:
+      # O "data_key" é a chave que sai do organizador (ex: pessoa_nome_completo)
+      - selector: "#input-nome"
+        by: "css"
+        field_type: "text"
+        data_key: "pessoa_nome_completo"
+        
+      - selector: "cpf"
+        by: "id"
+        field_type: "text"
+        data_key: "pessoa_cpf"
+        
+      - selector: "#data-nasc"
+        by: "css"
+        field_type: "date"
+        data_key: "pessoa_data_nascimento"
+
+  # 3. Pausar manualmente (Opcional, só se o site tiver Captcha sempre no mesmo lugar)
+  # O nosso BrowserManager já pausa sozinho se detectar a palavra CAPTCHA, 
+  # mas você pode forçar uma pausa explícita aqui.
+  - type: "pause"
+    name: "Esperar o usuário passar pelo ReCAPTCHA"
+    reason: "Por favor, resolva o ReCAPTCHA na tela do Chrome e clique em Continuar no aplicativo."
+
+  # 4. Clicar no botão Finalizar
+  - type: "click"
+    name: "Enviar formulário"
+    selector: "#btn-enviar"
+    by: "css"
