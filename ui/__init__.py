@@ -10,10 +10,12 @@ from .state_gemini import AppState
 from .upload_page_gemini import UploadPage
 from .sessions_page_gemini import SessionsPage
 from .settings_page_gemini import SettingsPage
+from .automation_page_gemini import AutomationPage
 
 __all__ = [
     "AppState",
     "UploadPage",
     "SessionsPage",
     "SettingsPage",
+    "AutomationPage",
 ]

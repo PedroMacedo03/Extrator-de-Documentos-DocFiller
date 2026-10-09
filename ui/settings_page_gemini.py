@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSpacerItem, QS
 
 try:
     from qfluentwidgets import (TitleLabel, SubtitleLabel, BodyLabel, 
-                                PasswordLineEdit, LineEdit,  # [Opus - v1.0 Prep]: Removed SwitchButton (Selenium disabled)
+                                PasswordLineEdit, LineEdit, SwitchButton,
                                 PrimaryPushButton, PushButton, InfoBar, InfoBarPosition)
     from .state_gemini import AppState
 except ImportError:
@@ -113,18 +113,18 @@ class SettingsPage(QWidget):
         ocrLayout.addWidget(self.btnBrowseOcr)
         self.vBoxLayout.addLayout(ocrLayout)
         
-        # [Opus - v1.0 Prep]: Selenium automation section removed for v1.0
-        # --- SEÇÃO AUTOMAÇÃO WEB (DESABILITADA) ---
+        # [Opus - v0.9 Terminal]: Seção Automação Web ativa
         self.vBoxLayout.addSpacing(20)
         self.webLabel = SubtitleLabel("Automação Web (Selenium)", self)
         self.vBoxLayout.addWidget(self.webLabel)
         
-        self.webNoteLabel = BodyLabel(
-            "⚠️ A automação via Selenium está temporariamente desabilitada. "
-            "Este recurso retornará em uma versão futura.", self
-        )
-        self.webNoteLabel.setWordWrap(True)
-        self.vBoxLayout.addWidget(self.webNoteLabel)
+        self.webDescLabel = BodyLabel("Configurações do navegador para preenchimento de formulários.", self)
+        self.vBoxLayout.addWidget(self.webDescLabel)
+        
+        self.headlessSwitch = SwitchButton("Modo Oculto (Headless)", self)
+        self.headlessSwitch.setChecked(AppState.HEADLESS_MODE)
+        self.headlessSwitch.checkedChanged.connect(self.update_headless_mode)
+        self.vBoxLayout.addWidget(self.headlessSwitch)
         
         # Espaçador final para empurrar tudo para cima
         try:
@@ -138,6 +138,11 @@ class SettingsPage(QWidget):
     def update_api_key(self, text):
         # [Opus - v1.0 Prep]: Now persists key to settings.json via set_api_key
         AppState.set_api_key(text.strip())
+
+    def update_headless_mode(self, is_checked):
+        # [Opus - v0.9 Terminal]: Salva modo headless em settings.json
+        AppState.HEADLESS_MODE = is_checked
+        AppState.save_settings()
 
     def update_model(self, text):
         # Pega o nome técnico antes do primeiro espaço

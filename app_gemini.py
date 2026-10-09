@@ -27,8 +27,8 @@ from ui.settings_page_gemini import SettingsPage
 # [LEGACY]: from ui.data_page_gemini import DataPage
 # [GEMINI - FASE 6]: Nova SessionsPage que substitui a antiga DataPage
 from ui.sessions_page_gemini import SessionsPage
-# [Opus - v1.0 Prep]: Aba 'Automação Web' (Selenium) desativada para a v1.0. Retornará em versão futura.
-# from ui.automation_page_gemini import AutomationPage
+# [Opus - v0.9 Terminal]: Aba 'Automação Web' (Selenium) ativa para execução via terminal/PowerShell
+from ui.automation_page_gemini import AutomationPage
 
 class DocFillerApp(FluentWindow):
     def __init__(self):
@@ -47,7 +47,8 @@ class DocFillerApp(FluentWindow):
         # [LEGACY]: self.data_page = DataPage(self)
         # [GEMINI - FASE 6]: Substituição pela SessionsPage
         self.sessions_page = SessionsPage(self)
-        # [Opus - v1.0 Prep]: self.automation_page = AutomationPage(self)
+        # [Opus - v0.9 Terminal]: Automação Web ativa
+        self.automation_page = AutomationPage(self)
         self.settings_page = SettingsPage(self)
         
         # [GEMINI - CORREÇÃO H3 & FASE 6]: Conexão reativa:
@@ -65,7 +66,8 @@ class DocFillerApp(FluentWindow):
         # Adiciona itens na barra lateral
         self.addSubInterface(self.upload_page, FIF.FOLDER_ADD, 'Upload de Documentos')
         self.addSubInterface(self.sessions_page, FIF.DOCUMENT, 'Sessões e Documentos')
-        # [Opus - v1.0 Prep]: self.addSubInterface(self.automation_page, FIF.PLAY, 'Automação Web')
+        # [Opus - v0.9 Terminal]: Adiciona Automação Web na barra lateral
+        self.addSubInterface(self.automation_page, FIF.PLAY, 'Automação Web')
         
         # Separador para configurações no rodapé
         self.addSubInterface(
