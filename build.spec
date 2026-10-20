@@ -43,7 +43,15 @@ hiddenimports += collect_submodules('pydantic')
 hiddenimports += collect_submodules('pydantic_core')
 
 # 5. Dependências adicionais
-hiddenimports += ['PIL', 'PIL.Image', 'pytesseract', 'yaml', 'sqlite3']
+hiddenimports += [
+    'PIL', 'PIL.Image', 'pytesseract', 'yaml', 'sqlite3',
+    'core.entity_resolver_gemini',
+    'ui.sessions',
+    'ui.sessions.field_row',
+    'ui.sessions.session_list_panel',
+    'ui.sessions.entity_panel',
+    'ui.sessions.attached_docs_panel',
+]
 
 # 6. Inclui arquivos de configuração (exemplo YAML)
 config_dir = BASE_DIR / "config"

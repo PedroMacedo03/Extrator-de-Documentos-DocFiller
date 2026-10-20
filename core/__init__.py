@@ -5,6 +5,7 @@ DocFiller — Módulo Core
 """
 
 from .database_gemini import DatabaseManager
+from .entity_resolver_gemini import EntityResolver  # [Opus - v1.1 Sessions Redesign]
 from .extractor_gemini import GeminiExtractor
 from .masker_gemini import DataMasker
 from .models_gemini import ExtractedDocument
@@ -16,6 +17,7 @@ from . import paths
 
 __all__ = [
     "DatabaseManager",
+    "EntityResolver",
     "GeminiExtractor",
     "DataMasker",
     "ExtractedDocument",

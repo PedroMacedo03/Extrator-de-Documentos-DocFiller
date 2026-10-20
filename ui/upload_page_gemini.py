@@ -265,7 +265,8 @@ class UploadPage(QWidget):
             
         target_index = 0
         for idx, s in enumerate(sessions):
-            display_text = f"{s['name']} ({s['doc_count']} docs)"
+            seq = s.get('seq_number') or s['id']
+            display_text = f"#{seq} — {s['name']} ({s['doc_count']} docs)"
             self.sessionCombo.addItem(display_text, userData=s['id'])
             if select_id is not None and s['id'] == select_id:
                 target_index = idx
@@ -287,9 +288,10 @@ class UploadPage(QWidget):
         InfoBar.info("Sessão Ativada", f"Novos uploads serão salvos nesta sessão.", duration=2500, parent=self)
 
     def create_new_session_dialog(self):
-        """Abre diálogo para criar nova sessão com nome padrão data/hora."""
-        # [GEMINI]: Formato solicitado: HH/MM - DD/MM/AA
-        default_name = datetime.now().strftime("Sessão %H/%M - %d/%m/%y")
+        """Abre diálogo para criar nova sessão com numeração fixa padrão."""
+        # [Opus - v1.1 Sessions Redesign]: Sugere 'Sessão Nº' com ordem fixa (editável manualmente pelo usuário)
+        next_seq = self.db.get_next_session_seq_number()
+        default_name = f"Sessão {next_seq}"
         name, ok = QInputDialog.getText(
             self, 
             "Nova Sessão", 

@@ -2,6 +2,27 @@
 
 ---
 
+## v1.1.0 — "Estação de Verificação Manual em 4 Colunas: Pessoas & Imóveis" (Outubro/2026)
+
+> [Opus - v1.1 Sessions Redesign]
+
+### 🖥️ Redesign Completo da Aba "Sessões e Documentos" (`ui/sessions_page_gemini.py`, `ui/sessions/*`)
+- **Layout em 4 Colunas independentes (`QSplitter`):**
+  1. **Coluna 1 (`SESSÕES`):** Ordem de criação **fixa** (`seq_number`), exibindo data de criação e data da última alteração em cada item. O nome da sessão nunca é alterado automaticamente (apenas manualmente).
+  2. **Coluna 2 (`PAINEL DA SESSÃO`):** Dividido em `DADOS` (da pessoa selecionada), `PESSOAS`, `DOCUMENTOS` (apenas os documentos pertencentes à pessoa selecionada), `IMÓVEIS`, `DADOS IMÓVEL` e rodapé fixo com `DATA DE CRIAÇÃO DA SESSÃO` e `DATA DA ÚLTIMA ALTERAÇÃO DA SESSÃO`.
+  3. **Coluna 3 (`LISTA DOS DOCS. ANEXADOS`):** Lista limpa de todos os documentos enviados na sessão, sem exibir informações pessoais.
+  4. **Coluna 4 (`PRÉVIA DO DOCUMENTO SELECIONADO`):** Visualizador PyMuPDF dedicado exclusivamente à imagem/página do documento, sem tabelas de dados pessoais ao lado.
+- **Linha de Atributo Interativa (`AttributeFieldRow`):**
+  - **Clique simples:** Seleciona a linha e revela o botão `✏️` no extremo direito (permitindo selecionar texto com o mouse sem entrar em modo de edição acidentalmente).
+  - **Duplo clique:** Copia imediatamente o valor do atributo para a área de transferência com notificação visual.
+  - **Botão `✏️`:** Edição inline individual por atributo (Salvar / Cancelar), gravando override na Pessoa/Imóvel sem alterar o JSON original do documento e permitindo restaurar o valor extraído (`↺`).
+
+### 🧠 Reconhecimento e Consolidação de Pessoas e Imóveis (`core/entity_resolver_gemini.py`, `core/database_gemini.py`)
+- **Reconhecimento de Múltiplas Pessoas por Sessão:** Identifica e agrupa automaticamente documentos pertencentes a `TITULAR`, `CONJUGE`, `COMPRADOR` e `VENDEDOR` (mantendo pais/avós apenas como dado `nome_pais` do titular e sem criar pessoas para contribuinte de IPTU ou proprietários de certidão de imóvel).
+- **Proteção contra Homônimos e Consolidação por Prioridade:** Agrupa por CPF, RG + Nome ou Nome compatível (nunca mesclando CPFs distintos), escolhe o valor da fonte documental mais confiável e exibe alerta `⚠️` com menu de escolha quando documentos divergem.
+
+---
+
 ## v1.0.2 — "Blindagem LGPD, Padronização em Caixa Alta & Integridade de Dados" (Outubro/2026)
 
 > [Opus - Security Audit]
