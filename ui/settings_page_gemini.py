@@ -42,7 +42,7 @@ class SettingsPage(QWidget):
         
         # Campo de Senha para API Key
         self.apiInput = PasswordLineEdit(self)
-        self.apiInput.setPlaceholderText("Cole sua Gemini API Key aqui...")
+        self.apiInput.setPlaceholderText("Cole sua Gemini API Key aqui")
         self.apiInput.setClearButtonEnabled(True)
         # [LEGACY]: Campo iniciava vazio, forçando colar a cada teste
         # [GEMINI - CORREÇÃO H7]: Preenche com a chave salva em memória se houver

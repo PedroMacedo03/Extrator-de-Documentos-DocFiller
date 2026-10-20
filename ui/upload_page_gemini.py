@@ -59,14 +59,14 @@ class ExtractWorker(QThread):
                 return
 
             # 2. Inicialização dos motores
-            self.progress.emit(10, "Iniciando motor de OCR...")
+            self.progress.emit(10, "Iniciando motor de OCR")
             ocr = HybridOCR(tesseract_cmd=AppState.TESSERACT_PATH)
             masker = DataMasker()
             extractor = GeminiExtractor(api_key=AppState.GEMINI_API_KEY, model_name=AppState.GEMINI_MODEL)
             db = DatabaseManager()
 
             # 3. Salva uma cópia local segura
-            self.progress.emit(15, "Salvando cópia do documento no sistema...")
+            self.progress.emit(15, "Salvando cópia do documento no sistema")
             saved_path = db.save_file_locally(self.file_path)
 
             # [Opus - v1.0 Multi-Doc]: TIFF multipágina vira PDF para entrar no mesmo fluxo
@@ -75,7 +75,7 @@ class ExtractWorker(QThread):
 
             # [LEGACY]: raw_text = ocr.extract_text(saved_path)  (texto único, 1 documento por arquivo)
             # [Opus - v1.0 Multi-Doc]: OCR página a página
-            self.progress.emit(25, "Extraindo texto bruto (OCR) página a página...")
+            self.progress.emit(25, "Extraindo texto bruto (OCR) página a página")
             pages = ocr.extract_pages(saved_path)
             if not any(p.strip() for p in pages):
                 raise ValueError("Nenhum texto encontrado na imagem/PDF.")
@@ -83,14 +83,14 @@ class ExtractWorker(QThread):
 
             # 5. Mascaramento LGPD (Scrub) — arquivo inteiro de uma vez, com marcadores de página,
             # para que os tokens sejam consistentes entre as páginas.
-            self.progress.emit(45, "Aplicando filtros de privacidade LGPD (Mascaramento)...")
+            self.progress.emit(45, "Aplicando filtros de privacidade LGPD (Mascaramento)")
             masking_result = masker.mask(join_pages_with_markers(pages))
             masked_pages = split_masked_text(masking_result.masked_text, num_pages)
             full_token_map = masking_result.token_map
 
             # [Opus - v1.0 Multi-Doc]: Segmentação (somente texto mascarado vai à nuvem)
             if num_pages > 1:
-                self.progress.emit(55, f"Identificando documentos dentro do arquivo ({num_pages} páginas)...")
+                self.progress.emit(55, f"Identificando documentos dentro do arquivo ({num_pages} páginas)")
                 segmenter = DocumentSegmenter(api_key=AppState.GEMINI_API_KEY, model_name=AppState.GEMINI_MODEL)
                 segments = segmenter.segment(masked_pages)
             else:
@@ -106,12 +106,12 @@ class ExtractWorker(QThread):
             original_stem = Path(self.file_path).stem
             for idx, ((a, b, _tipo), sub_path) in enumerate(zip(segments, sub_paths), start=1):
                 pct = 60 + int(35 * (idx - 1) / len(segments))
-                self.progress.emit(pct, f"Enviando documento {idx}/{len(segments)} para a IA (Gemini)...")
+                self.progress.emit(pct, f"Enviando documento {idx} de {len(segments)} para a Inteligência Artificial (Gemini)")
                 seg_text = "\n\n".join(masked_pages[a - 1:b])
                 # [Opus - Security Audit (Item 8)]: Filtro case-insensitive para tokens presentes neste segmento
                 seg_text_upper = seg_text.upper()
                 seg_token_map = {t: v for t, v in full_token_map.items() if t.upper() in seg_text_upper}
-                pages_label = f"p.{a}" if a == b else f"p.{a}-{b}"
+                pages_label = f"página {a}" if a == b else f"páginas {a} a {b}"
                 try:
                     extracted_doc = extractor.extract_structured_data(seg_text)
                     doc_dict = extracted_doc.documento.model_dump(exclude_none=True)
@@ -219,7 +219,7 @@ class UploadPage(QWidget):
         self.vBoxLayout.addWidget(self.progressBar)
         
         # Status Label
-        self.statusLabel = BodyLabel("Aguardando arquivo...", self)
+        self.statusLabel = BodyLabel("Aguardando arquivo", self)
         self.statusLabel.hide()
         self.vBoxLayout.addWidget(self.statusLabel)
         
@@ -266,7 +266,9 @@ class UploadPage(QWidget):
         target_index = 0
         for idx, s in enumerate(sessions):
             seq = s.get('seq_number') or s['id']
-            display_text = f"#{seq} — {s['name']} ({s['doc_count']} docs)"
+            doc_count = int(s.get('doc_count', 0) or 0)
+            doc_word = "documento" if doc_count == 1 else "documentos"
+            display_text = f"#{seq} — {s['name']} ({doc_count} {doc_word})"
             self.sessionCombo.addItem(display_text, userData=s['id'])
             if select_id is not None and s['id'] == select_id:
                 target_index = idx
@@ -383,7 +385,7 @@ class UploadPage(QWidget):
             try:
                 size_str = self._format_file_size(p.stat().st_size)
             except Exception:
-                size_str = "Tamanho desc."
+                size_str = "Tamanho desconhecido"
             self.fileList.addItem(f"{icon} | {p.name} ({size_str}) — ⏳ Na fila")
 
         self.file_queue.extend(valid_files)
@@ -413,11 +415,11 @@ class UploadPage(QWidget):
         filename = Path(file_path).name
         self.statusLabel.setText(f"Iniciando: {filename}{suffix}")
 
-        # [Opus - v1.0 Multi-Doc]: Atualiza o status visual do item na lista para 'Processando...'
+        # [Opus - v1.0 Multi-Doc]: Atualiza o status visual do item na lista para 'Processando'
         for i in range(self.fileList.count()):
             item = self.fileList.item(i)
             if filename in item.text() and "Na fila" in item.text():
-                item.setText(f"⚙️ {item.text().split('—')[0].strip()} — Processando...")
+                item.setText(f"⚙️ {item.text().split('—')[0].strip()} — Processando")
                 break
 
         # [GEMINI - FASE 6]: Passa session_id para o Worker

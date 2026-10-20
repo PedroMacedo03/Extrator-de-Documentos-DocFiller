@@ -75,7 +75,7 @@ class AttributeFieldRow(QFrame):
 
         # Editor inline (oculto por padrão; só abre ao clicar no botão ✏️)
         self.edit_input = QLineEdit(self)
-        self.edit_input.setPlaceholderText(f"DIGITE {self.label_text.upper()}...")
+        self.edit_input.setPlaceholderText(f"DIGITE {self.label_text.upper()}")
         self.edit_input.setStyleSheet(
             "QLineEdit { padding: 2px 6px; font-size: 12px; border: 1px solid #009faa; border-radius: 4px; }"
         )

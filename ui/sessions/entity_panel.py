@@ -1,20 +1,22 @@
 """
-DocFiller — Coluna 2: Painel Central da Sessão (Dados / Pessoas / Documentos / Imóveis / Dados Imóvel)
-======================================================================================================
+DocFiller — Coluna 2: Painel Central da Sessão (Pessoas / Dados / Documentos || Imóveis / Dados Imóvel)
+========================================================================================================
 
 [Opus - v1.1 Sessions Redesign]:
-Implementa a coluna central exatamente como no mockup enviado pelo usuário:
-1. Bloco 'DADOS': exibe os 6 atributos consolidados da Pessoa selecionada
-   (nome completo, data de nascimento, data de obito, nome dos pais, CPF, RG).
-2. Bloco 'PESSOAS': lista as pessoas reconhecidas na sessão (marcando a selecionada com
-   '◄ (SELECIONADO)'), com suporte a renomear, mesclar e excluir.
-3. Bloco 'DOCUMENTOS': lista apenas os documentos que pertencem à Pessoa selecionada
-   (sem exibir dados pessoais na lista). Clicar em um documento abre na prévia (Coluna 4).
-4. Bloco 'IMÓVEIS': lista os imóveis reconhecidos na sessão (marcando o selecionado com
-   '◄ (SELECIONADO)').
-5. Bloco 'DADOS IMÓVEL': exibe os 4 atributos consolidados do Imóvel selecionado
-   (endereço + complementos, inscrição municipal, matrícula do imóvel, CEP).
-6. Rodapé: exibe 'DATA DE CRIAÇÃO DA SESSÃO' e 'DATA DA ÚLTIMA ALTERAÇÃO DA SESSÃO'.
+Implementa a coluna central com a organização e funcionalidades solicitadas pelo usuário:
+1. Sem abreviações e sem reticências em nenhum rótulo, botão ou menu.
+2. Ordem de cima para baixo:
+   - Domínio de PESSOAS (identidade visual Azul-Petróleo):
+     1º PESSOAS (seleção de pessoa)
+     2º DADOS (atributos consolidados da pessoa selecionada)
+     3º DOCUMENTOS (documentos pertencentes à pessoa selecionada)
+   - Separação de alto destaque visual entre o grupo de PESSOAS e o grupo de IMÓVEIS.
+   - Domínio de IMÓVEIS (identidade visual Âmbar/Dourado):
+     4º IMÓVEIS (seleção de imóvel)
+     5º DADOS IMÓVEL (atributos consolidados do imóvel selecionado)
+   - Rodapé fixo com DATA DE CRIAÇÃO DA SESSÃO e DATA DA ÚLTIMA ALTERAÇÃO DA SESSÃO.
+3. Redimensionamento vertical dinâmico (QSplitter vertical) em todas as seções, permitindo
+   aumentar e diminuir livremente a altura de PESSOAS, DADOS, DOCUMENTOS, IMÓVEIS e DADOS IMÓVEL.
 """
 
 from __future__ import annotations
@@ -22,10 +24,10 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QCursor
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QListWidgetItem, QMenu, QPushButton,
-    QScrollArea, QSizePolicy, QVBoxLayout, QWidget
+    QScrollArea, QSplitter, QVBoxLayout, QWidget
 )
 
 from qfluentwidgets import CardWidget, ListWidget
@@ -37,28 +39,28 @@ from .field_row import AttributeFieldRow
 from .session_list_panel import format_datetime_br
 
 
-# Mapa amigável de tipos de documento para exibição limpa nas listas
+# Mapa sem abreviações para tipos de documento
 DOC_TYPE_FRIENDLY_LABELS: Dict[str, str] = {
-    "RG": "IDENTIDADE (RG)",
-    "CIN": "CARTEIRA DE IDENTIDADE NACIONAL (CIN)",
-    "CNH": "CNH",
-    "CPF": "COMPROVANTE DE CPF",
+    "RG": "CARTEIRA DE IDENTIDADE",
+    "CIN": "CARTEIRA DE IDENTIDADE NACIONAL",
+    "CNH": "CARTEIRA NACIONAL DE HABILITAÇÃO",
+    "CPF": "COMPROVANTE DE CADASTRO DE PESSOA FÍSICA",
     "NASCIMENTO": "CERTIDÃO DE NASCIMENTO",
     "CASAMENTO": "CERTIDÃO DE CASAMENTO",
     "OBITO": "CERTIDÃO DE ÓBITO",
-    "ESCRITURA": "ESCRITURA",
+    "ESCRITURA": "ESCRITURA PÚBLICA",
     "ESCRITURA_COMPRA_VENDA": "ESCRITURA DE COMPRA E VENDA",
-    "IPTU": "IPTU",
-    "CERTIDAO_IMOVEL": "CERTIDÃO DE IMÓVEL",
+    "IPTU": "IMPOSTO PREDIAL E TERRITORIAL URBANO",
+    "CERTIDAO_IMOVEL": "CERTIDÃO DE MATRÍCULA DE IMÓVEL",
     "TITULO_ELEITOR": "TÍTULO DE ELEITOR",
     "PASSAPORTE": "PASSAPORTE",
     "CERTIFICADO_RESERVISTA": "CERTIFICADO DE RESERVISTA",
-    "CARTAO_SUS": "CARTÃO DO SUS (CNS)",
-    "CARTEIRA_ESTUDANTE_DNE": "CARTEIRA DE ESTUDANTE (DNE)",
+    "CARTAO_SUS": "CARTÃO NACIONAL DE SAÚDE",
+    "CARTEIRA_ESTUDANTE_DNE": "CARTEIRA DE IDENTIFICAÇÃO ESTUDANTIL",
     "CARTEIRA_CONSELHO": "CARTEIRA DE CONSELHO PROFISSIONAL",
     "IDENTIDADE_FUNCIONAL": "IDENTIDADE FUNCIONAL",
-    "CERTIFICADO_DIPLOMA": "CERTIFICADO / DIPLOMA",
-    "CTPS": "CARTEIRA DE TRABALHO (CTPS)",
+    "CERTIFICADO_DIPLOMA": "CERTIFICADO OU DIPLOMA",
+    "CTPS": "CARTEIRA DE TRABALHO E PREVIDÊNCIA SOCIAL",
     "OUTROS": "DOCUMENTO",
 }
 
@@ -68,21 +70,44 @@ def format_doc_type_label(doc_type: str) -> str:
     return DOC_TYPE_FRIENDLY_LABELS.get(t, t)
 
 
-def _create_section_header(title: str, parent: QWidget, right_button: Optional[QPushButton] = None) -> QFrame:
-    """Cria faixa de título de seção no estilo estruturado do mockup."""
+def _create_section_header(
+    title: str,
+    parent: QWidget,
+    domain: str = "PERSON",
+    right_button: Optional[QPushButton] = None,
+) -> QFrame:
+    """
+    Cria faixa de cabeçalho com destaque visual distinto para cabeçalhos de PESSOAS
+    (azul-petróleo) versus cabeçalhos de IMÓVEIS (âmbar/dourado).
+    """
     frame = QFrame(parent)
-    frame.setStyleSheet(
-        "QFrame { background-color: rgba(0, 159, 170, 0.14); "
-        "border-top: 1px solid rgba(128, 128, 128, 0.35); "
-        "border-bottom: 1px solid rgba(128, 128, 128, 0.35); }"
-    )
+    if domain == "PROPERTY":
+        frame.setStyleSheet(
+            "QFrame { background-color: rgba(212, 136, 6, 0.22); "
+            "border-left: 4px solid #d48806; "
+            "border-top: 1px solid rgba(212, 136, 6, 0.50); "
+            "border-bottom: 1px solid rgba(212, 136, 6, 0.50); }"
+        )
+        text_color = "#f0a020"
+    else:
+        frame.setStyleSheet(
+            "QFrame { background-color: rgba(0, 159, 170, 0.18); "
+            "border-left: 4px solid #009faa; "
+            "border-top: 1px solid rgba(0, 159, 170, 0.45); "
+            "border-bottom: 1px solid rgba(0, 159, 170, 0.45); }"
+        )
+        text_color = "#00b7c3"
+
     lay = QHBoxLayout(frame)
-    lay.setContentsMargins(8, 3, 8, 3)
+    lay.setContentsMargins(8, 4, 8, 4)
     lay.setSpacing(6)
 
     lbl = QLabel(title.upper(), frame)
     lbl.setAlignment(Qt.AlignCenter if right_button is None else Qt.AlignVCenter | Qt.AlignLeft)
-    lbl.setStyleSheet("font-weight: 700; font-size: 11px; letter-spacing: 0.6px; border: none; background: transparent;")
+    lbl.setStyleSheet(
+        f"font-weight: 800; font-size: 11px; letter-spacing: 0.7px; color: {text_color}; "
+        "border: none; background: transparent;"
+    )
     lay.addWidget(lbl, 1)
 
     if right_button is not None:
@@ -93,8 +118,11 @@ def _create_section_header(title: str, parent: QWidget, right_button: Optional[Q
 
 class SessionEntityPanel(CardWidget):
     """
-    Coluna 2: Painel empilhado com Dados (Pessoa), Pessoas, Documentos (da Pessoa),
-    Imóveis, Dados Imóvel e Rodapé com Datas da Sessão.
+    Coluna 2: Painel verticalmente redimensionável com:
+    [Domínio Pessoas]: PESSOAS -> DADOS -> DOCUMENTOS
+    === Separador de Destaque ===
+    [Domínio Imóveis]: IMÓVEIS -> DADOS IMÓVEL
+    + Rodapé com Datas da Sessão.
     """
 
     person_selected = Signal(int)                           # person_id
@@ -121,7 +149,7 @@ class SessionEntityPanel(CardWidget):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setMinimumWidth(310)
+        self.setMinimumWidth(320)
 
         self._current_person_id: Optional[int] = None
         self._current_property_id: Optional[int] = None
@@ -134,119 +162,239 @@ class SessionEntityPanel(CardWidget):
 
     def _init_ui(self):
         outer_layout = QVBoxLayout(self)
-        outer_layout.setContentsMargins(0, 0, 0, 0)
-        outer_layout.setSpacing(0)
+        outer_layout.setContentsMargins(6, 6, 6, 6)
+        outer_layout.setSpacing(4)
 
-        # Scroll suave para garantir que todos os 5 blocos cabem mesmo em telas menores
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        # Splitter vertical principal que separa o DOMÍNIO DE PESSOAS (acima)
+        # do DOMÍNIO DE IMÓVEIS (abaixo) com uma barra divisória de alto destaque
+        self.domain_splitter = QSplitter(Qt.Vertical, self)
+        self.domain_splitter.setChildrenCollapsible(False)
+        self.domain_splitter.setHandleWidth(12)
+        self.domain_splitter.setStyleSheet("""
+            QSplitter::handle:vertical {
+                background-color: rgba(212, 136, 6, 0.28);
+                border-top: 2px solid #009faa;
+                border-bottom: 2px solid #d48806;
+                margin: 2px 0px;
+            }
+            QSplitter::handle:vertical:hover {
+                background-color: rgba(212, 136, 6, 0.50);
+            }
+        """)
 
-        container = QWidget(scroll)
-        vbox = QVBoxLayout(container)
-        vbox.setContentsMargins(6, 6, 6, 6)
-        vbox.setSpacing(4)
+        # ══════════════════════════════════════════════════════════
+        # BLOCO SUPERIOR: DOMÍNIO DE PESSOAS (PESSOAS -> DADOS -> DOCUMENTOS)
+        # ══════════════════════════════════════════════════════════
+        persons_domain_box = QFrame(self.domain_splitter)
+        persons_domain_box.setStyleSheet(
+            "QFrame#PersonsDomainBox { border: 1px solid rgba(0, 159, 170, 0.35); border-radius: 6px; }"
+        )
+        persons_domain_box.setObjectName("PersonsDomainBox")
+        persons_domain_layout = QVBoxLayout(persons_domain_box)
+        persons_domain_layout.setContentsMargins(4, 4, 4, 4)
+        persons_domain_layout.setSpacing(0)
 
-        # ──────────────────────────────────────────────────────────
-        # 1. SEÇÃO: DADOS (da Pessoa selecionada)
-        # ──────────────────────────────────────────────────────────
-        self.header_person_data = _create_section_header("DADOS", container)
-        vbox.addWidget(self.header_person_data)
+        # Splitter vertical interno para redimensionar livremente PESSOAS ↕ DADOS ↕ DOCUMENTOS
+        self.persons_splitter = QSplitter(Qt.Vertical, persons_domain_box)
+        self.persons_splitter.setChildrenCollapsible(False)
+        self.persons_splitter.setHandleWidth(6)
+        self.persons_splitter.setStyleSheet("""
+            QSplitter::handle:vertical {
+                background-color: rgba(0, 159, 170, 0.18);
+                border-top: 1px solid rgba(0, 159, 170, 0.40);
+                margin: 1px 4px;
+            }
+            QSplitter::handle:vertical:hover {
+                background-color: rgba(0, 159, 170, 0.45);
+            }
+        """)
+
+        # ── 1. Aba PESSOAS (no topo) ──
+        pane_persons = QWidget(self.persons_splitter)
+        pane_persons.setMinimumHeight(68)
+        lay_persons = QVBoxLayout(pane_persons)
+        lay_persons.setContentsMargins(0, 0, 0, 2)
+        lay_persons.setSpacing(3)
+
+        btn_add_person = QPushButton("➕ Adicionar", pane_persons)
+        btn_add_person.setFixedHeight(20)
+        btn_add_person.setCursor(Qt.PointingHandCursor)
+        btn_add_person.setToolTip("Adicionar Pessoa manualmente nesta sessão")
+        btn_add_person.setStyleSheet(
+            "QPushButton { padding: 1px 6px; border: 1px solid rgba(0, 159, 170, 0.55); "
+            "border-radius: 3px; font-size: 10px; font-weight: 600; }"
+            "QPushButton:hover { background: rgba(0, 159, 170, 0.25); }"
+        )
+        btn_add_person.clicked.connect(self.add_person_requested.emit)
+        lay_persons.addWidget(
+            _create_section_header("👤 PESSOAS", pane_persons, domain="PERSON", right_button=btn_add_person)
+        )
+
+        self.persons_list = ListWidget(pane_persons)
+        self.persons_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.persons_list.customContextMenuRequested.connect(self._show_person_context_menu)
+        self.persons_list.itemClicked.connect(self._on_person_item_clicked)
+        lay_persons.addWidget(self.persons_list, 1)
+        self.persons_splitter.addWidget(pane_persons)
+
+        # ── 2. Aba DADOS (abaixo de PESSOAS) ──
+        pane_person_data = QWidget(self.persons_splitter)
+        pane_person_data.setMinimumHeight(90)
+        lay_person_data = QVBoxLayout(pane_person_data)
+        lay_person_data.setContentsMargins(0, 0, 0, 2)
+        lay_person_data.setSpacing(3)
+
+        self.header_person_data = _create_section_header("📋 DADOS", pane_person_data, domain="PERSON")
+        lay_person_data.addWidget(self.header_person_data)
+
+        person_data_scroll = QScrollArea(pane_person_data)
+        person_data_scroll.setWidgetResizable(True)
+        person_data_scroll.setFrameShape(QFrame.NoFrame)
+        person_data_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+
+        person_fields_widget = QWidget(person_data_scroll)
+        person_fields_box = QVBoxLayout(person_fields_widget)
+        person_fields_box.setContentsMargins(2, 2, 2, 2)
+        person_fields_box.setSpacing(2)
 
         self.person_field_rows: Dict[str, AttributeFieldRow] = {}
-        person_fields_box = QVBoxLayout()
-        person_fields_box.setContentsMargins(2, 2, 2, 4)
-        person_fields_box.setSpacing(2)
         for key, label in PERSON_DISPLAY_FIELDS:
-            row = AttributeFieldRow(key, label, container)
+            row = AttributeFieldRow(key, label, person_fields_widget)
             row.row_selected.connect(self._on_any_field_row_selected)
             row.value_copied.connect(self.field_copied.emit)
             row.override_saved.connect(self._on_person_field_override)
             self.person_field_rows[key] = row
             self._all_field_rows.append(row)
             person_fields_box.addWidget(row)
-        vbox.addLayout(person_fields_box)
+        person_fields_box.addStretch(1)
+        person_data_scroll.setWidget(person_fields_widget)
+        lay_person_data.addWidget(person_data_scroll, 1)
+        self.persons_splitter.addWidget(pane_person_data)
 
-        # ──────────────────────────────────────────────────────────
-        # 2. SEÇÃO: PESSOAS
-        # ──────────────────────────────────────────────────────────
-        btn_add_person = QPushButton("➕", container)
-        btn_add_person.setFixedSize(22, 20)
-        btn_add_person.setCursor(Qt.PointingHandCursor)
-        btn_add_person.setToolTip("Adicionar Pessoa manualmente nesta sessão")
-        btn_add_person.setStyleSheet(
-            "QPushButton { border: 1px solid rgba(0, 159, 170, 0.45); border-radius: 3px; font-size: 10px; }"
-            "QPushButton:hover { background: rgba(0, 159, 170, 0.25); }"
-        )
-        btn_add_person.clicked.connect(self.add_person_requested.emit)
-        vbox.addWidget(_create_section_header("PESSOAS", container, right_button=btn_add_person))
+        # ── 3. Aba DOCUMENTOS (abaixo de DADOS) ──
+        pane_person_docs = QWidget(self.persons_splitter)
+        pane_person_docs.setMinimumHeight(68)
+        lay_person_docs = QVBoxLayout(pane_person_docs)
+        lay_person_docs.setContentsMargins(0, 0, 0, 2)
+        lay_person_docs.setSpacing(3)
 
-        self.persons_list = ListWidget(container)
-        self.persons_list.setMinimumHeight(74)
-        self.persons_list.setMaximumHeight(115)
-        self.persons_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.persons_list.customContextMenuRequested.connect(self._show_person_context_menu)
-        self.persons_list.itemClicked.connect(self._on_person_item_clicked)
-        vbox.addWidget(self.persons_list)
+        lay_person_docs.addWidget(_create_section_header("📄 DOCUMENTOS", pane_person_docs, domain="PERSON"))
 
-        # ──────────────────────────────────────────────────────────
-        # 3. SEÇÃO: DOCUMENTOS (da Pessoa selecionada)
-        # ──────────────────────────────────────────────────────────
-        vbox.addWidget(_create_section_header("DOCUMENTOS", container))
-
-        self.person_docs_list = ListWidget(container)
-        self.person_docs_list.setMinimumHeight(78)
-        self.person_docs_list.setMaximumHeight(125)
+        self.person_docs_list = ListWidget(pane_person_docs)
         self.person_docs_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.person_docs_list.customContextMenuRequested.connect(self._show_person_doc_context_menu)
         self.person_docs_list.itemClicked.connect(self._on_person_doc_clicked)
-        vbox.addWidget(self.person_docs_list)
+        lay_person_docs.addWidget(self.person_docs_list, 1)
+        self.persons_splitter.addWidget(pane_person_docs)
 
-        # ──────────────────────────────────────────────────────────
-        # 4. SEÇÃO: IMÓVEIS
-        # ──────────────────────────────────────────────────────────
-        btn_add_prop = QPushButton("➕", container)
-        btn_add_prop.setFixedSize(22, 20)
+        self.persons_splitter.setStretchFactor(0, 2)
+        self.persons_splitter.setStretchFactor(1, 4)
+        self.persons_splitter.setStretchFactor(2, 2)
+        self.persons_splitter.setSizes([95, 195, 95])
+
+        persons_domain_layout.addWidget(self.persons_splitter, 1)
+        self.domain_splitter.addWidget(persons_domain_box)
+
+        # ══════════════════════════════════════════════════════════
+        # BLOCO INFERIOR: DOMÍNIO DE IMÓVEIS (IMÓVEIS -> DADOS IMÓVEL)
+        # ══════════════════════════════════════════════════════════
+        properties_domain_box = QFrame(self.domain_splitter)
+        properties_domain_box.setStyleSheet(
+            "QFrame#PropertiesDomainBox { border: 1px solid rgba(212, 136, 6, 0.45); border-radius: 6px; }"
+        )
+        properties_domain_box.setObjectName("PropertiesDomainBox")
+        properties_domain_layout = QVBoxLayout(properties_domain_box)
+        properties_domain_layout.setContentsMargins(4, 4, 4, 4)
+        properties_domain_layout.setSpacing(0)
+
+        # Splitter vertical interno para redimensionar livremente IMÓVEIS ↕ DADOS IMÓVEL
+        self.properties_splitter = QSplitter(Qt.Vertical, properties_domain_box)
+        self.properties_splitter.setChildrenCollapsible(False)
+        self.properties_splitter.setHandleWidth(6)
+        self.properties_splitter.setStyleSheet("""
+            QSplitter::handle:vertical {
+                background-color: rgba(212, 136, 6, 0.22);
+                border-top: 1px solid rgba(212, 136, 6, 0.45);
+                margin: 1px 4px;
+            }
+            QSplitter::handle:vertical:hover {
+                background-color: rgba(212, 136, 6, 0.50);
+            }
+        """)
+
+        # ── 4. Aba IMÓVEIS ──
+        pane_properties = QWidget(self.properties_splitter)
+        pane_properties.setMinimumHeight(64)
+        lay_properties = QVBoxLayout(pane_properties)
+        lay_properties.setContentsMargins(0, 0, 0, 2)
+        lay_properties.setSpacing(3)
+
+        btn_add_prop = QPushButton("➕ Adicionar", pane_properties)
+        btn_add_prop.setFixedHeight(20)
         btn_add_prop.setCursor(Qt.PointingHandCursor)
         btn_add_prop.setToolTip("Adicionar Imóvel manualmente nesta sessão")
         btn_add_prop.setStyleSheet(
-            "QPushButton { border: 1px solid rgba(0, 159, 170, 0.45); border-radius: 3px; font-size: 10px; }"
-            "QPushButton:hover { background: rgba(0, 159, 170, 0.25); }"
+            "QPushButton { padding: 1px 6px; border: 1px solid rgba(212, 136, 6, 0.60); "
+            "border-radius: 3px; font-size: 10px; font-weight: 600; }"
+            "QPushButton:hover { background: rgba(212, 136, 6, 0.25); }"
         )
         btn_add_prop.clicked.connect(self.add_property_requested.emit)
-        vbox.addWidget(_create_section_header("IMÓVEIS", container, right_button=btn_add_prop))
+        lay_properties.addWidget(
+            _create_section_header("🏠 IMÓVEIS", pane_properties, domain="PROPERTY", right_button=btn_add_prop)
+        )
 
-        self.properties_list = ListWidget(container)
-        self.properties_list.setMinimumHeight(68)
-        self.properties_list.setMaximumHeight(105)
+        self.properties_list = ListWidget(pane_properties)
         self.properties_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.properties_list.customContextMenuRequested.connect(self._show_property_context_menu)
         self.properties_list.itemClicked.connect(self._on_property_item_clicked)
-        vbox.addWidget(self.properties_list)
+        lay_properties.addWidget(self.properties_list, 1)
+        self.properties_splitter.addWidget(pane_properties)
 
-        # ──────────────────────────────────────────────────────────
-        # 5. SEÇÃO: DADOS IMÓVEL (do Imóvel selecionado)
-        # ──────────────────────────────────────────────────────────
-        vbox.addWidget(_create_section_header("DADOS IMÓVEL", container))
+        # ── 5. Aba DADOS IMÓVEL ──
+        pane_prop_data = QWidget(self.properties_splitter)
+        pane_prop_data.setMinimumHeight(80)
+        lay_prop_data = QVBoxLayout(pane_prop_data)
+        lay_prop_data.setContentsMargins(0, 0, 0, 2)
+        lay_prop_data.setSpacing(3)
+
+        lay_prop_data.addWidget(_create_section_header("📐 DADOS IMÓVEL", pane_prop_data, domain="PROPERTY"))
+
+        prop_data_scroll = QScrollArea(pane_prop_data)
+        prop_data_scroll.setWidgetResizable(True)
+        prop_data_scroll.setFrameShape(QFrame.NoFrame)
+        prop_data_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+
+        prop_fields_widget = QWidget(prop_data_scroll)
+        prop_fields_box = QVBoxLayout(prop_fields_widget)
+        prop_fields_box.setContentsMargins(2, 2, 2, 2)
+        prop_fields_box.setSpacing(2)
 
         self.property_field_rows: Dict[str, AttributeFieldRow] = {}
-        prop_fields_box = QVBoxLayout()
-        prop_fields_box.setContentsMargins(2, 2, 2, 4)
-        prop_fields_box.setSpacing(2)
         for key, label in PROPERTY_DISPLAY_FIELDS:
-            row = AttributeFieldRow(key, label, container)
+            row = AttributeFieldRow(key, label, prop_fields_widget)
             row.row_selected.connect(self._on_any_field_row_selected)
             row.value_copied.connect(self.field_copied.emit)
             row.override_saved.connect(self._on_property_field_override)
             self.property_field_rows[key] = row
             self._all_field_rows.append(row)
             prop_fields_box.addWidget(row)
-        vbox.addLayout(prop_fields_box)
+        prop_fields_box.addStretch(1)
+        prop_data_scroll.setWidget(prop_fields_widget)
+        lay_prop_data.addWidget(prop_data_scroll, 1)
+        self.properties_splitter.addWidget(pane_prop_data)
 
-        vbox.addStretch(1)
-        scroll.setWidget(container)
-        outer_layout.addWidget(scroll, 1)
+        self.properties_splitter.setStretchFactor(0, 2)
+        self.properties_splitter.setStretchFactor(1, 3)
+        self.properties_splitter.setSizes([85, 135])
+
+        properties_domain_layout.addWidget(self.properties_splitter, 1)
+        self.domain_splitter.addWidget(properties_domain_box)
+
+        self.domain_splitter.setStretchFactor(0, 6)
+        self.domain_splitter.setStretchFactor(1, 4)
+        self.domain_splitter.setSizes([390, 230])
+
+        outer_layout.addWidget(self.domain_splitter, 1)
 
         # ──────────────────────────────────────────────────────────
         # 6. RODAPÉ FIXO: DATAS DE CRIAÇÃO E ÚLTIMA ALTERAÇÃO DA SESSÃO
@@ -254,17 +402,17 @@ class SessionEntityPanel(CardWidget):
         footer_frame = QFrame(self)
         footer_frame.setStyleSheet(
             "QFrame { border-top: 2px solid rgba(128, 128, 128, 0.35); "
-            "background-color: rgba(128, 128, 128, 0.06); }"
+            "background-color: rgba(128, 128, 128, 0.06); border-radius: 4px; }"
         )
         footer_layout = QVBoxLayout(footer_frame)
         footer_layout.setContentsMargins(10, 6, 10, 6)
         footer_layout.setSpacing(2)
 
-        self.lbl_created_at = QLabel("DATA DE CRIAÇÃO DA SESSÃO: -", footer_frame)
+        self.lbl_created_at = QLabel("DATA DE CRIAÇÃO DA SESSÃO: Não informado", footer_frame)
         self.lbl_created_at.setStyleSheet("font-size: 11px; font-weight: 700; border: none;")
         footer_layout.addWidget(self.lbl_created_at)
 
-        self.lbl_updated_at = QLabel("DATA DA ÚLTIMA ALTERAÇÃO DA SESSÃO: -", footer_frame)
+        self.lbl_updated_at = QLabel("DATA DA ÚLTIMA ALTERAÇÃO DA SESSÃO: Não informado", footer_frame)
         self.lbl_updated_at.setStyleSheet("font-size: 11px; font-weight: 700; color: #009faa; border: none;")
         footer_layout.addWidget(self.lbl_updated_at)
 
@@ -300,7 +448,6 @@ class SessionEntityPanel(CardWidget):
             self.populate_person_documents([])
             return None
 
-        # Determina qual pessoa fica selecionada
         valid_ids = [p["id"] for p in persons]
         if selected_person_id in valid_ids:
             chosen_id = selected_person_id
@@ -419,7 +566,7 @@ class SessionEntityPanel(CardWidget):
         return self._current_property_id
 
     # ──────────────────────────────────────────────────────────────
-    # Callbacks internos e Menus de Contexto
+    # Callbacks internos e Menus de Contexto (sem reticências)
     # ──────────────────────────────────────────────────────────────
 
     def _on_any_field_row_selected(self, selected_row: AttributeFieldRow):
@@ -469,7 +616,7 @@ class SessionEntityPanel(CardWidget):
 
         other_persons = [p for p in self._persons_cache if p["id"] != pid]
         if other_persons:
-            merge_menu = menu.addMenu("🔗 Mesclar esta pessoa com...")
+            merge_menu = menu.addMenu("🔗 Mesclar esta pessoa com")
             for op in other_persons:
                 act_m = QAction(f"👤 {op['display_name']}", self)
                 act_m.triggered.connect(
@@ -507,7 +654,7 @@ class SessionEntityPanel(CardWidget):
         if link_id is not None:
             other_persons = [p for p in self._persons_cache if p["id"] != self._current_person_id]
             if other_persons:
-                move_menu = menu.addMenu("🔄 Reatribuir documento para outra pessoa...")
+                move_menu = menu.addMenu("🔄 Reatribuir documento para outra pessoa")
                 for op in other_persons:
                     act_mv = QAction(f"👤 {op['display_name']}", self)
                     act_mv.triggered.connect(
@@ -515,7 +662,7 @@ class SessionEntityPanel(CardWidget):
                     )
                     move_menu.addAction(act_mv)
 
-            act_split = QAction("➕ Separar documento em Nova Pessoa...", self)
+            act_split = QAction("➕ Separar documento em Nova Pessoa", self)
             act_split.triggered.connect(lambda: self.split_doc_to_new_person_requested.emit(int(link_id), int(ext_id)))
             menu.addAction(act_split)
 

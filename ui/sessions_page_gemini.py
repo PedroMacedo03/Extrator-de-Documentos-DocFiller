@@ -115,7 +115,7 @@ class DocumentPreviewWidget(CardWidget):
         self.btn_prev_page.setEnabled(False)
         toolbar.addWidget(self.btn_prev_page)
 
-        self.lbl_page_counter = BodyLabel("Pág. 0 / 0", self)
+        self.lbl_page_counter = BodyLabel("Página 0 de 0", self)
         self.lbl_page_counter.setStyleSheet("font-weight: 500; font-size: 12px;")
         toolbar.addWidget(self.lbl_page_counter)
 
@@ -255,7 +255,7 @@ class DocumentPreviewWidget(CardWidget):
         self.btn_zoom_in.setEnabled(False)
         self.btn_fit_width.setEnabled(False)
         self.btn_open_external.setEnabled(False)
-        self.lbl_page_counter.setText("Pág. 0 / 0")
+        self.lbl_page_counter.setText("Página 0 de 0")
 
     def render_current_page(self):
         if not self.doc or self.current_page < 0 or self.current_page >= self.total_pages:
@@ -273,7 +273,7 @@ class DocumentPreviewWidget(CardWidget):
             self.lbl_image.setPixmap(pixmap)
             self.lbl_image.setStyleSheet("border: 1px solid rgba(0, 0, 0, 0.15); border-radius: 4px;")
 
-            self.lbl_page_counter.setText(f"Pág. {self.current_page + 1} / {self.total_pages}")
+            self.lbl_page_counter.setText(f"Página {self.current_page + 1} de {self.total_pages}")
             self.lbl_zoom.setText(f"{int(self.zoom_factor * 100)}%")
             self.btn_prev_page.setEnabled(self.current_page > 0)
             self.btn_next_page.setEnabled(self.current_page < self.total_pages - 1)

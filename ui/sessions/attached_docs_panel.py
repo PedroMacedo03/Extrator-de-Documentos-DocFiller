@@ -3,12 +3,11 @@ DocFiller — Coluna 3: Lista dos Documentos Anexados na Sessão
 =============================================================
 
 [Opus - v1.1 Sessions Redesign]:
-Implementa a Coluna 3 ('LISTA DOS DOCS. ANEXADOS' do mockup):
+Implementa a Coluna 3 ('LISTA DOS DOCUMENTOS ANEXADOS'):
 - Lista todos os documentos enviados na sessão ativa.
 - NÃO exibe nenhuma informação pessoal (apenas o tipo do documento e o nome do arquivo).
 - Clicar em qualquer documento carrega-o imediatamente na Prévia (Coluna 4).
-- Inclui botão 🗑️ para exclusão rápida e menu de contexto para vincular manualmente
-  a uma Pessoa ou Imóvel caso necessário.
+- Sem abreviações e sem reticências.
 """
 
 from __future__ import annotations
@@ -40,7 +39,7 @@ class AttachedDocsPanel(CardWidget):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setMinimumWidth(195)
+        self.setMinimumWidth(205)
         self._docs_cache: List[Dict[str, Any]] = []
         self._persons_cache: List[Dict[str, Any]] = []
         self._properties_cache: List[Dict[str, Any]] = []
@@ -51,7 +50,7 @@ class AttachedDocsPanel(CardWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
 
-        # Cabeçalho "LISTA DOS DOCS. ANEXADOS" conforme mockup
+        # Cabeçalho "LISTA DOS DOCUMENTOS ANEXADOS" (sem abreviação)
         header_frame = QFrame(self)
         header_frame.setStyleSheet(
             "QFrame { background-color: rgba(0, 159, 170, 0.14); "
@@ -62,7 +61,7 @@ class AttachedDocsPanel(CardWidget):
         header_lay.setContentsMargins(6, 5, 6, 5)
         header_lay.setSpacing(1)
 
-        self.lbl_header = QLabel("LISTA DOS DOCS.\nANEXADOS", header_frame)
+        self.lbl_header = QLabel("LISTA DOS DOCUMENTOS\nANEXADOS", header_frame)
         self.lbl_header.setAlignment(Qt.AlignCenter)
         self.lbl_header.setStyleSheet(
             "font-weight: 700; font-size: 11px; letter-spacing: 0.5px; border: none; background: transparent;"
@@ -83,7 +82,7 @@ class AttachedDocsPanel(CardWidget):
         bottom_row.setContentsMargins(2, 0, 2, 0)
         bottom_row.setSpacing(4)
 
-        self.lbl_count = QLabel("0 documento(s)", self)
+        self.lbl_count = QLabel("0 documentos", self)
         self.lbl_count.setStyleSheet("font-size: 11px; color: #888;")
         bottom_row.addWidget(self.lbl_count, 1)
 
@@ -122,7 +121,8 @@ class AttachedDocsPanel(CardWidget):
         self._docs_cache = docs
         self.docs_list.blockSignals(True)
         self.docs_list.clear()
-        self.lbl_count.setText(f"{len(docs)} documento(s)")
+        doc_word = "documento" if len(docs) == 1 else "documentos"
+        self.lbl_count.setText(f"{len(docs)} {doc_word}")
 
         if not docs:
             empty_item = QListWidgetItem("Nenhum documento anexado")
@@ -194,7 +194,7 @@ class AttachedDocsPanel(CardWidget):
         menu.addAction(act_open)
 
         if ext_id is not None and self._persons_cache:
-            person_menu = menu.addMenu("👤 Vincular a Pessoa...")
+            person_menu = menu.addMenu("👤 Vincular a Pessoa")
             for p in self._persons_cache:
                 act_p = QAction(f"👤 {p['display_name']}", self)
                 act_p.triggered.connect(
@@ -203,7 +203,7 @@ class AttachedDocsPanel(CardWidget):
                 person_menu.addAction(act_p)
 
         if ext_id is not None and self._properties_cache:
-            prop_menu = menu.addMenu("🏠 Vincular a Imóvel...")
+            prop_menu = menu.addMenu("🏠 Vincular a Imóvel")
             for pr in self._properties_cache:
                 act_pr = QAction(f"🏠 {pr['label']}", self)
                 act_pr.triggered.connect(

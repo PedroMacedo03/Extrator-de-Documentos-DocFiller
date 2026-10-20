@@ -7,6 +7,7 @@ DocFiller — Coluna 1: Painel de Lista de Sessões (Ordem Fixa + Datas)
   quando a sessão sofre alterações posteriores.
 - Mostra em cada item o número fixo, o nome (alterável apenas manualmente),
   a data de criação e a data da última alteração.
+- Sem abreviações e sem reticências na interface.
 """
 
 from __future__ import annotations
@@ -15,20 +16,20 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QCursor
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QListWidgetItem, QMenu, QVBoxLayout, QWidget
+    QHBoxLayout, QListWidgetItem, QMenu, QVBoxLayout, QWidget
 )
 
 from qfluentwidgets import (
-    BodyLabel, CardWidget, ListWidget, PrimaryPushButton, PushButton, SearchLineEdit, SubtitleLabel
+    CardWidget, ListWidget, PrimaryPushButton, PushButton, SearchLineEdit, SubtitleLabel
 )
 
 
 def format_datetime_br(val: Any) -> str:
     """Formata timestamps do banco no padrão brasileiro HH:MM - DD/MM/AAAA."""
     if not val:
-        return "-"
+        return "Não informado"
     if isinstance(val, datetime):
         return val.strftime("%H:%M - %d/%m/%Y")
     val_str = str(val).strip()
@@ -47,7 +48,7 @@ def format_datetime_br(val: Any) -> str:
 
 class SessionListPanel(CardWidget):
     """
-    Coluna 1 ('sessoes' do mockup):
+    Coluna 1 ('SESSÕES'):
     Lista de sessões com ordem de criação fixa, datas de criação/alteração e botões de gestão.
     """
 
@@ -60,7 +61,7 @@ class SessionListPanel(CardWidget):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setMinimumWidth(205)
+        self.setMinimumWidth(215)
         self._sessions_cache: List[Dict[str, Any]] = []
         self._init_ui()
 
@@ -76,7 +77,7 @@ class SessionListPanel(CardWidget):
         header_row.addWidget(header_lbl)
         header_row.addStretch(1)
 
-        self.btn_new = PrimaryPushButton("➕ Nova", self)
+        self.btn_new = PrimaryPushButton("➕ Nova Sessão", self)
         self.btn_new.setFixedHeight(28)
         self.btn_new.setToolTip("Criar Nova Sessão")
         self.btn_new.clicked.connect(self.create_requested.emit)
@@ -85,7 +86,7 @@ class SessionListPanel(CardWidget):
 
         # Busca (mantida como self.search_box para compatibilidade com Ctrl+F)
         self.search_box = SearchLineEdit(self)
-        self.search_box.setPlaceholderText("Filtrar sessões...")
+        self.search_box.setPlaceholderText("Filtrar sessões")
         self.search_box.textChanged.connect(self.search_changed.emit)
         layout.addWidget(self.search_box)
 
@@ -101,9 +102,9 @@ class SessionListPanel(CardWidget):
         actions_row = QHBoxLayout()
         actions_row.setSpacing(5)
 
-        self.btn_resume = PushButton("📥 Upload", self)
+        self.btn_resume = PushButton("📥 Enviar Documentos", self)
         self.btn_resume.setFixedHeight(28)
-        self.btn_resume.setToolTip("Retomar esta sessão na aba de Upload")
+        self.btn_resume.setToolTip("Abrir esta sessão na aba de Upload de Documentos")
         self.btn_resume.clicked.connect(self._emit_resume_current)
         actions_row.addWidget(self.btn_resume)
 
@@ -139,22 +140,22 @@ class SessionListPanel(CardWidget):
             sid = s["id"]
             seq = s.get("seq_number") or sid
             name = s.get("name") or f"Sessão {seq}"
-            doc_count = s.get("doc_count", 0)
+            doc_count = int(s.get("doc_count", 0) or 0)
+            doc_word = "documento" if doc_count == 1 else "documentos"
             created_str = format_datetime_br(s.get("created_at"))
             updated_str = format_datetime_br(s.get("updated_at"))
 
-            # Se o nome já começa com "Sessão <seq>", evita repetir o número
             title_prefix = f"#{seq} · {name}" if not name.lower().startswith(f"sessão {seq}") else name
             item_text = (
-                f"📁 {title_prefix}  ({doc_count} docs)\n"
-                f"   Criada: {created_str}\n"
-                f"   Alterada: {updated_str}"
+                f"📁 {title_prefix}  ({doc_count} {doc_word})\n"
+                f"   Data de criação: {created_str}\n"
+                f"   Última alteração: {updated_str}"
             )
             item = QListWidgetItem(item_text)
             item.setData(Qt.UserRole, sid)
             item.setToolTip(
                 f"<b>Ordem Fixa #{seq} — {name}</b><br>"
-                f"Documentos anexados: {doc_count}<br>"
+                f"Quantidade: {doc_count} {doc_word}<br>"
                 f"Data de criação: {created_str}<br>"
                 f"Última alteração: {updated_str}"
             )
@@ -207,11 +208,11 @@ class SessionListPanel(CardWidget):
             return
 
         menu = QMenu(self)
-        act_resume = QAction("📥 Retomar Sessão no Upload", self)
+        act_resume = QAction("📥 Retomar Sessão na Aba de Upload", self)
         act_resume.triggered.connect(lambda: self.resume_requested.emit(sid))
         menu.addAction(act_resume)
 
-        act_rename = QAction("✏️ Renomear Sessão (Manual)", self)
+        act_rename = QAction("✏️ Renomear Sessão Manualmente", self)
         act_rename.triggered.connect(lambda: self.rename_requested.emit(sid))
         menu.addAction(act_rename)
 

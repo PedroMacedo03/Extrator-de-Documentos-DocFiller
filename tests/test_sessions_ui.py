@@ -71,6 +71,10 @@ def test_sessions_page_four_columns():
 
         # Verifica as 4 colunas no QSplitter
         assert page.splitter.count() == 4
+        # Verifica os splitters verticais de redimensionamento dinâmico na Coluna 2
+        assert page.col2_entities.domain_splitter.count() == 2
+        assert page.col2_entities.persons_splitter.count() == 3  # 1: PESSOAS -> 2: DADOS -> 3: DOCUMENTOS
+        assert page.col2_entities.properties_splitter.count() == 2  # 4: IMÓVEIS -> 5: DADOS IMÓVEL
         assert page.col2_entities.persons_list.count() == 2  # Carlos (comprador/titular) + Marcos (vendedor)
         assert page.col2_entities.properties_list.count() == 1  # AV BRASIL, 500
         assert page.col3_attached.docs_list.count() == 2  # RG + ESCRITURA
