@@ -125,14 +125,10 @@ class HybridOCR:
             # [GEMINI - MULTI-PASS]: Executa PSM padrão e PSM 6 (bloco uniforme). Em documentos como RG,
             # os campos em caixas adjacentes (ex: RG e Data de Expedição) são ignorados pelo PSM 3 mas
             # lidos com máxima fidelidade pelo PSM 6.
+            # [Opus - RG/CNH Multi-Layout OCR]: Inclui 3ª passada sem filtro agressivo (img original em PSM 6)
+            # para evitar que fundos de segurança (guilloche de CNH e RGs coloridos) destruam dígitos de CPF.
             try:
-                text_std = pytesseract.image_to_string(processed_img, lang=self.lang)
-                try:
-                    text_block = pytesseract.image_to_string(processed_img, lang=self.lang, config='--psm 6')
-                    combined_page = text_std + "\n\n=== SEGMENTAÇÃO EM BLOCO ===\n" + text_block
-                except Exception:
-                    combined_page = text_std
-
+                combined_page = self._run_multipass_ocr(img, processed_img)
                 full_text.append(f"--- PÁGINA {i+1} ---\n{combined_page}")
             except pytesseract.TesseractNotFoundError:
                 doc.close()
@@ -153,12 +149,8 @@ class HybridOCR:
         processed_img = self._preprocess_image(img)
         
         try:
-            text_std = pytesseract.image_to_string(processed_img, lang=self.lang)
-            try:
-                text_block = pytesseract.image_to_string(processed_img, lang=self.lang, config='--psm 6')
-                result = text_std + "\n\n=== SEGMENTAÇÃO EM BLOCO ===\n" + text_block
-            except Exception:
-                result = text_std
+            # [Opus - RG/CNH Multi-Layout OCR]: Usa pipeline multi-pass (com e sem filtro de nitidez)
+            result = self._run_multipass_ocr(img, processed_img)
 
             print(f"[OCR] Imagem processada com sucesso ({path.name}).")
             return result
@@ -191,7 +183,7 @@ class HybridOCR:
         return pages
 
     def _ocr_single_page(self, page) -> str:
-        """[Opus - v1.0 Multi-Doc]: OCR (PSM 3 + PSM 6) de uma única página de PDF."""
+        """[Opus - v1.0 Multi-Doc]: OCR (PSM 3 + PSM 6 + Raw PSM 6) de uma única página de PDF."""
         if pytesseract is None:
             raise ImportError("pytesseract não instalado. Execute: pip install pytesseract")
         zoom = 300 / 72
@@ -200,14 +192,36 @@ class HybridOCR:
         img = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
         processed_img = self._preprocess_image(img)
         try:
-            text_std = pytesseract.image_to_string(processed_img, lang=self.lang)
-            try:
-                text_block = pytesseract.image_to_string(processed_img, lang=self.lang, config='--psm 6')
-                return text_std + "\n\n=== SEGMENTAÇÃO EM BLOCO ===\n" + text_block
-            except Exception:
-                return text_std
+            return self._run_multipass_ocr(img, processed_img)
         except pytesseract.TesseractNotFoundError:
             raise FileNotFoundError("O executável do Tesseract OCR não foi encontrado no Windows! Verifique as configurações.")
+
+    def _run_multipass_ocr(self, raw_img: Image.Image, processed_img: Image.Image) -> str:
+        """
+        # [Opus - RG/CNH Multi-Layout OCR]: Combina 3 leituras complementares:
+        # 1. Imagem alto-contraste em PSM 3 (layout geral)
+        # 2. Imagem alto-contraste em PSM 6 (caixas adjacentes de RG antigo/novo)
+        # 3. Imagem original sem filtro agressivo em PSM 6 (preserva CPF/Nome sobre fundo de segurança de CNH/RG)
+        """
+        parts = []
+        text_std = pytesseract.image_to_string(processed_img, lang=self.lang)
+        parts.append(text_std)
+
+        try:
+            text_block = pytesseract.image_to_string(processed_img, lang=self.lang, config="--psm 6")
+            if text_block.strip():
+                parts.append("=== SEGMENTAÇÃO EM BLOCO ===\n" + text_block)
+        except Exception:
+            pass
+
+        try:
+            text_raw_block = pytesseract.image_to_string(raw_img, lang=self.lang, config="--psm 6")
+            if text_raw_block.strip():
+                parts.append("=== LEITURA SUAVE (FUNDO DE SEGURANÇA) ===\n" + text_raw_block)
+        except Exception:
+            pass
+
+        return "\n\n".join(parts)
 
     def _preprocess_image(self, img: Image.Image) -> Image.Image:
         """

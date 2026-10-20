@@ -10,6 +10,7 @@ reais porque eles sequer são enviados (devido ao DataMasker).
 """
 
 import json
+import re
 from google import genai
 from google.genai import types
 from pydantic import ValidationError
@@ -35,37 +36,50 @@ class GeminiExtractor:
             "um JSON válido seguindo o schema exigido.\n\n"
             "MUITO IMPORTANTE - TOKENS DE MASCARAMENTO:\n"
             "1. PRESERVAÇÃO DE TOKENS: O texto pode conter tokens gerados por um sistema de privacidade "
-            "(ex: [CPF_001], [NOME_001], [RG_001], [DATA_001], [REMOVIDO_LGPD]). "
-            "Você DEVE manter esses tokens exatamente como estão ao preencher os campos do JSON.\n"
+            "(ex: [CPF_001], [NOME_001], [RG_001], [DATA_001], [CNS_001], [TITULO_001], "
+            "[RA_001], [PASSAPORTE_001], [MRZ_001], [MATRICULA_001], [REGISTRO_001], [REMOVIDO_LGPD]). "
+            "Você DEVE manter esses tokens exatamente como estão (com colchetes e em MAIÚSCULAS) ao preencher os campos do JSON.\n"
             "2. NUNCA INVENTE TOKENS: Você só deve usar um token se ele estiver EXPLICITAMENTE escrito no texto. "
             "Se o nome da pessoa ou um dado estiver no texto sem token, extraia o texto real como está no documento. "
-            "JAMAIS substitua dados reais por tokens inventados como [NOME_001]!\n\n"
+            "JAMAIS substitua dados reais por tokens inventados como [NOME_001]!\n"
+            "3. TEXTO EM LETRAS MAIÚSCULAS: Retorne TODOS os valores de texto extraídos em LETRAS MAIÚSCULAS (CAIXA ALTA).\n\n"
             "REGRAS ESPECÍFICAS PARA CARTEIRA DE IDENTIDADE (RG):\n"
             "1. NÚMERO DO RG: O RG é composto de 7 a 10 dígitos (ex: '30.580.301-7', '12.345.678-9' ou '804938626'). "
             "Ele geralmente fica identificado como 'REGISTRO GERAL', 'RG' ou no cabeçalho do documento.\n"
             "2. NUNCA USE A MATRÍCULA COMO RG: Identidades brasileiras frequentemente trazem no verso o campo "
             "'DOC ORIGEM' contendo a matrícula da certidão de nascimento (um código longo com mais de 20 caracteres e hífens, "
-            "ex: '08-01-95-2003-1-00229-049-0107434-13'). Esse número longo NUNCA é o RG! Ignore a matrícula para o campo rg.\n"
-            "3. Se o número do RG real (de 7 a 10 dígitos) não for legível no texto, retorne null. NUNCA coloque a matrícula no campo rg.\n\n"
-            "REGRAS ESPECÍFICAS PARA CERTIDÕES BRASILEIRAS:\n"
+            "ex: '08-01-95-2003-1-00229-049-0107434-13' ou token [MATRICULA_001]). Esse número longo NUNCA é o RG! Ignore a matrícula para o campo rg.\n"
+            "3. Se o número do RG real (de 7 a 10 dígitos) não for legível no texto, retorne null. NUNCA coloque a matrícula no campo rg.\n"
+            "4. CPF EM DIFERENTES MODELOS DE RG (ÚLTIMOS 20 ANOS): O layout do RG mudou diversas vezes entre estados e décadas. "
+            "O CPF pode aparecer no topo, no meio ou na base do verso/frente, e o rótulo 'CPF' em fonte minúscula quase sempre sofre "
+            "distorção no OCR (aparecendo como 'cre', 'cor', 'cpr', 'cpe', 'PE', '4d' ou sem rótulo visível, ex: 'cre [CPF_001]' ou 'PE [CPF_001]'). "
+            "QUALQUER token [CPF_001] (ou [CPF_xxx]) presente no texto JÁ FOI VALIDADO MATEMATICAMENTE como um CPF real pelo motor de privacidade. "
+            "Portanto, se houver [CPF_001] no texto de um RG, CNH, CIN ou documento pessoal, você DEVE OBRIGATORIAMENTE preenchê-lo em 'pessoa.cpf'!\n\n"
+            "REGRAS ESPECÍFICAS PARA CERTIDÕES BRASILEIRAS (NASCIMENTO, CASAMENTO, ÓBITO):\n"
             "1. DATAS POR EXTENSO: Em certidões de nascimento/casamento/óbito, datas quase sempre vêm "
             "escritas por extenso. Converta rigorosamente para o formato DD/MM/AAAA numérico.\n"
             "2. NÃO CONFUNDA DATAS: Em certidões, diferencie a 'Data de Nascimento' da pessoa da 'Data do Registro' "
             "ou 'Data de Emissão'. O campo data_nascimento deve conter EXCLUSIVAMENTE a data em que a pessoa nasceu.\n"
             "3. FILIAÇÃO: Em certidões e RGs, os nomes dos pais costumam vir após 'filho de', 'sendo pai', 'sendo mãe' ou 'FILIAÇÃO'. "
-            "Limpe quaisquer partículas jurídicas ou repetições resultantes de ruído de OCR.\n\n"
+            "Preencha a lista 'nome_pais' em 'pessoa' (ex: ['[NOME_002]', '[NOME_003]']).\n"
+            "4. MATRÍCULA E CARTÓRIO: Extraia a matrícula de 32 dígitos (ou token [MATRICULA_001]) no campo 'matricula' e o nome do cartório em 'cartorio'.\n"
+            "5. CASAMENTO: Classifique como 'CASAMENTO', preencha a lista 'conjuges' (cada item com nome_completo, cpf, rg, data_nascimento, nome_pais), 'regime_bens' e 'data_casamento'.\n\n"
+            "REGRAS ESPECÍFICAS PARA ESCRITURAS, IPTU E CERTIDÃO DE IMÓVEL:\n"
+            "1. ESCRITURA: Classifique como 'ESCRITURA'. Preencha 'cartorio', 'livro', 'folha', 'data_lavratura', 'valor_transacao', listas 'compradores' e 'vendedores', e o objeto 'imovel' (inscricao_municipal, matricula_imovel, endereco_completo, cep).\n"
+            "2. IPTU: Classifique como 'IPTU'. Preencha 'ano_exercicio', 'valor_venal', 'contribuinte' (objeto Person) e 'imovel' (objeto RealEstate).\n"
+            "3. CERTIDÃO DE IMÓVEL: Classifique como 'CERTIDAO_IMOVEL'. Preencha 'imovel', lista 'proprietarios' e 'onus_reais'.\n\n"
             "REGRAS ESPECÍFICAS PARA TÍTULO DE ELEITOR:\n"
             "1. Classifique como 'TITULO_ELEITOR'.\n"
-            "2. NÚMERO DO TÍTULO: O número da inscrição eleitoral possui 12 dígitos numéricos (ex: '0123 4567 8901'). Extraia no campo 'numero_titulo'.\n"
+            "2. NÚMERO DO TÍTULO: O número da inscrição eleitoral possui 12 dígitos numéricos (ou token [TITULO_001]). Extraia no campo 'numero_titulo'.\n"
             "3. ZONA E SEÇÃO: Extraia os números respectivos da 'zona' (geralmente 3 dígitos) e 'secao' (geralmente 4 dígitos).\n"
             "4. MUNICÍPIO E UF: Extraia o município e a sigla do estado do domicílio eleitoral.\n"
             "5. DADOS PESSOAIS: Nome do eleitor, data de nascimento e filiação (pai/mãe) devem ser preenchidos no objeto 'pessoa'.\n\n"
             "REGRAS ESPECÍFICAS PARA IDENTIDADES MILITARES, POLICIAIS E CONSELHOS PROFISSIONAIS (OAB, CRM, CREA):\n"
             "1. Classifique como 'IDENTIDADE_FUNCIONAL'.\n"
-            "2. ÓRGÃO/CORPORAÇÃO EMISSOR: Preencha 'orgao_emissor' com o nome explícito (ex: 'Exército Brasileiro', 'Marinha do Brasil', 'Polícia Militar', 'OAB', 'CRM', 'CREA', 'Polícia Federal').\n"
+            "2. ÓRGÃO/CORPORAÇÃO EMISSOR: Preencha 'orgao_emissor' com o nome explícito (ex: 'EXÉRCITO BRASILEIRO', 'MARINHA DO BRASIL', 'POLÍCIA MILITAR', 'OAB', 'CRM', 'CREA', 'POLÍCIA FEDERAL').\n"
             "3. CATEGORIA FUNCIONAL: Defina 'categoria_funcional' como 'MILITAR', 'POLICIAL', 'CONSELHO_PROFISSIONAL' ou 'ORGAO_PUBLICO'.\n"
             "4. REGISTRO/MATRÍCULA: Extraia o número de matrícula militar, identidade militar ou registro profissional no conselho no campo 'numero_registro'.\n"
-            "5. POSTO/GRADUAÇÃO/CARGO: Se houver patente militar ou profissão/cargo (ex: 'Capitão', 'Sargento', 'Tenente', 'Advogado', 'Médico', 'Engenheiro'), extraia em 'posto_graduacao_cargo'.\n"
+            "5. POSTO/GRADUAÇÃO/CARGO: Se houver patente militar ou profissão/cargo (ex: 'CAPITÃO', 'SARGENTO', 'TENENTE', 'ADVOGADO', 'MÉDICO', 'ENGENHEIRO'), extraia em 'posto_graduacao_cargo'.\n"
             "6. DADOS PESSOAIS: Nome, CPF, RG civil (se constar), nascimento e filiação devem ser extraídos no objeto 'pessoa'.\n\n"
             "REGRAS ESPECÍFICAS PARA CERTIFICADOS DE ENSINO MÉDIO, CURSOS E DIPLOMAS:\n"
             "1. Classifique como 'CERTIFICADO_DIPLOMA'.\n"
@@ -77,27 +91,27 @@ class GeminiExtractor:
             "REGRAS ESPECÍFICAS PARA CARTEIRA DE IDENTIDADE NACIONAL (CIN - NOVO RG NACIONAL):\n"
             "1. Classifique como 'CIN' quando o documento trouxer 'REPÚBLICA FEDERATIVA DO BRASIL', 'CARTEIRA DE IDENTIDADE' "
             "e tiver o CPF como número único de identificação.\n"
-            "2. O CPF é o identificador central (coloque em pessoa.cpf). No verso, se houver código MRZ (duas/três linhas com chevron <<<), extraia em 'codigo_mrz'.\n"
+            "2. O CPF é o identificador central (coloque em pessoa.cpf). No verso, se houver código MRZ (duas/três linhas com chevron <<< ou token [MRZ_001]), extraia em 'codigo_mrz'.\n"
             "3. Se houver número de RG antigo estadual, extraia em 'registro_geral_antigo'.\n"
             "4. Extraia tipo sanguíneo/fator RH se citado (ex: O+, A-).\n\n"
             "REGRAS ESPECÍFICAS PARA PASSAPORTE BRASILEIRO:\n"
             "1. Classifique como 'PASSAPORTE'.\n"
-            "2. NÚMERO DO PASSAPORTE: O número do passaporte brasileiro é composto de 2 letras seguidas de 6 dígitos numéricos (ex: 'BR123456', 'FU123456', 'CD987654'). Extraia no campo 'numero_passaporte'.\n"
-            "3. Código MRZ: No rodapé da página de identificação constam 2 linhas de 44 caracteres com chevrons (<<<). Extraia em 'codigo_mrz'.\n"
-            "4. Autoridade expedidora: Normalmente 'DPF' ou 'Polícia Federal'.\n\n"
+            "2. NÚMERO DO PASSAPORTE: O número do passaporte brasileiro é composto de 2 letras seguidas de 6 dígitos numéricos (ex: 'BR123456', 'FU123456' ou token [PASSAPORTE_001]). Extraia no campo 'numero_passaporte'.\n"
+            "3. Código MRZ: No rodapé da página de identificação constam 2 linhas de 44 caracteres com chevrons (<<<) ou token [MRZ_001]. Extraia em 'codigo_mrz'.\n"
+            "4. Autoridade expedidora: Normalmente 'DPF' ou 'POLÍCIA FEDERAL'.\n\n"
             "REGRAS ESPECÍFICAS PARA CARTEIRAS DE ORDENS E CONSELHOS (OAB, CRM, CREA, CRC, CRO, ETC.):\n"
             "1. Classifique como 'CARTEIRA_CONSELHO'.\n"
             "2. Identifique o conselho em 'orgao_conselho' (ex: 'OAB', 'CRM', 'CREA', 'CRC', 'CRP').\n"
-            "3. Extraia o número de inscrição/registro em 'numero_registro' e a seccional/estado em 'seccional_uf'.\n"
+            "3. Extraia o número de inscrição/registro em 'numero_registro' (ou token [REGISTRO_001]) e a seccional/estado em 'seccional_uf'.\n"
             "4. Tipo de inscrição ('ADVOGADO', 'MEDICO', 'ESTAGIARIO', etc.) em 'tipo_inscricao'.\n\n"
             "REGRAS ESPECÍFICAS PARA CERTIFICADO DE RESERVISTA / MILITAR (CDI, CAM, CR):\n"
             "1. Classifique como 'CERTIFICADO_RESERVISTA'.\n"
-            "2. RA (REGISTRO DE ALISTAMENTO): Composto por 12 dígitos. Extraia em 'numero_ra'.\n"
+            "2. RA (REGISTRO DE ALISTAMENTO): Composto por 12 dígitos (ou token [RA_001]). Extraia em 'numero_ra'.\n"
             "3. Tipo militar: Identifique se é 'DISPENSA_INCORPORACAO_CDI', 'RESERVISTA_1_CATEGORIA', 'ALISTAMENTO_CAM', etc.\n"
             "4. Força Armada ou Junta Militar: Extraia em 'forca_armada' e 'circunscricao_militar'.\n\n"
             "REGRAS ESPECÍFICAS PARA CARTÃO NACIONAL DE SAÚDE (CARTÃO DO SUS):\n"
             "1. Classifique como 'CARTAO_SUS'.\n"
-            "2. NÚMERO CNS: Composto de 15 dígitos numéricos (iniciando geralmente em 1, 2, 7, 8 ou 9). Extraia em 'numero_cns'.\n"
+            "2. NÚMERO CNS: Composto de 15 dígitos numéricos (ou token [CNS_001]). Extraia em 'numero_cns'.\n"
             "3. Nome do titular e nascimento em 'pessoa'.\n\n"
             "REGRAS ESPECÍFICAS PARA DOCUMENTO NACIONAL DO ESTUDANTE (DNE / CIE):\n"
             "1. Classifique como 'CARTEIRA_ESTUDANTE_DNE'.\n"
@@ -106,16 +120,109 @@ class GeminiExtractor:
             "REGRA GERAL: Se uma informação não constar explicitamente no documento, retorne null. Não invente dados."
         )
 
+    @classmethod
+    def _uppercase_values(cls, obj):
+        """
+        # [Opus - Security Audit (Item 8)]: Converte recursivamente todos os valores textuais
+        # extraídos pelo modelo para LETRAS MAIÚSCULAS (preservando as chaves do dicionário em minúsculas).
+        """
+        if isinstance(obj, str):
+            return obj.upper()
+        if isinstance(obj, list):
+            return [cls._uppercase_values(item) for item in obj]
+        if isinstance(obj, dict):
+            return {k: cls._uppercase_values(v) for k, v in obj.items()}
+        return obj
+
+    @classmethod
+    def _normalize_doc_dict(cls, data_dict: dict, masked_text: str = "") -> dict:
+        """
+        # [Opus - Security Audit (Item 6 & Item 8)]: Alinha variações de nomenclatura do LLM
+        # com os schemas Pydantic (ex: ESCRITURA_COMPRA_VENDA -> ESCRITURA, sincronia pessoa/conjuges/contribuinte)
+        # e converte todos os valores para CAIXA ALTA.
+        # [Opus - RG/CNH Multi-Layout CPF]: Garante determinísticamente que, se o documento for individual
+        # (RG, CNH, CIN, etc.) e o texto mascarado contiver [CPF_001] (ou [RG_001] em RG/CNH), o campo
+        # pessoa.cpf (e pessoa.rg) seja preenchido mesmo quando o rótulo do OCR estava corrompido ('cre', 'PE').
+        """
+        if not isinstance(data_dict, dict):
+            return data_dict
+
+        # Normalização de chave raiz caso o modelo devolva os dados direto na raiz
+        if "documento" not in data_dict and "tipo" in data_dict:
+            data_dict = {
+                "documento": data_dict,
+                "confianca": 90,
+                "observacoes": None,
+            }
+        elif "documento" not in data_dict:
+            data_dict = {
+                "documento": {"tipo": "OUTROS", **data_dict},
+                "confianca": 80,
+                "observacoes": None,
+            }
+
+        doc = data_dict.get("documento")
+        if isinstance(doc, dict):
+            tipo = str(doc.get("tipo", "OUTROS")).strip().upper()
+            if tipo == "ESCRITURA_COMPRA_VENDA":
+                tipo = "ESCRITURA"
+            doc["tipo"] = tipo
+
+            # Sincroniza campos específicos onde o LLM frequentemente usa 'pessoa' no lugar do campo específico
+            pessoa = doc.get("pessoa") if isinstance(doc.get("pessoa"), dict) else None
+            if tipo == "CASAMENTO":
+                conjuges = doc.get("conjuges")
+                if (not conjuges or not isinstance(conjuges, list)) and pessoa:
+                    doc["conjuges"] = [pessoa]
+            elif tipo == "ESCRITURA":
+                compradores = doc.get("compradores")
+                if (not compradores or not isinstance(compradores, list)) and pessoa:
+                    doc["compradores"] = [pessoa]
+            elif tipo == "IPTU":
+                if not isinstance(doc.get("contribuinte"), dict) and pessoa:
+                    doc["contribuinte"] = pessoa
+                elif isinstance(doc.get("contribuinte"), dict) and not pessoa:
+                    doc["pessoa"] = doc["contribuinte"]
+
+            # [Opus - RG/CNH Multi-Layout CPF]: Fallback determinístico de CPF e RG para documentos de titular único
+            single_holder_types = {
+                "RG", "CNH", "CIN", "CPF", "CTPS", "TITULO_ELEITOR",
+                "IDENTIDADE_FUNCIONAL", "CERTIFICADO_DIPLOMA", "PASSAPORTE",
+                "CARTEIRA_CONSELHO", "CERTIFICADO_RESERVISTA", "CARTAO_SUS",
+                "CARTEIRA_ESTUDANTE_DNE", "NASCIMENTO", "OBITO",
+            }
+            if tipo in single_holder_types and masked_text:
+                if not isinstance(doc.get("pessoa"), dict):
+                    doc["pessoa"] = {}
+                pessoa_ref = doc["pessoa"]
+                if not pessoa_ref.get("cpf"):
+                    cpf_match = re.search(r"\[CPF_\d{3}\]", masked_text, re.IGNORECASE)
+                    if cpf_match:
+                        pessoa_ref["cpf"] = cpf_match.group(0).upper()
+                if tipo in ("RG", "CNH") and not pessoa_ref.get("rg"):
+                    rg_match = re.search(r"\[RG_\d{3}\]", masked_text, re.IGNORECASE)
+                    if rg_match:
+                        pessoa_ref["rg"] = rg_match.group(0).upper()
+
+            # Converte valores do documento para MAIÚSCULAS
+            data_dict["documento"] = cls._uppercase_values(doc)
+
+        if isinstance(data_dict.get("observacoes"), str):
+            data_dict["observacoes"] = data_dict["observacoes"].upper()
+
+        return data_dict
+
     def extract_structured_data(self, masked_text: str) -> ExtractedDocument:
         """
         Envia o texto mascarado para o Gemini e retorna o objeto tipado ExtractedDocument.
         """
         
+        # [Opus - Security Audit (Item 6)]: Prompt alinhado com os nomes exatos dos modelos Pydantic
         prompt = (
-            "Classifique o documento abaixo e extraia seus dados estruturados como JSON no formato:\n"
+            "Classifique o documento abaixo e extraia seus dados estruturados como JSON (valores em LETRAS MAIÚSCULAS) no formato:\n"
             "{\n"
             '  "documento": {\n'
-            '    "tipo": "<RG|CNH|CTPS|CPF|CASAMENTO|NASCIMENTO|OBITO|ESCRITURA_COMPRA_VENDA|IPTU|CERTIDAO_IMOVEL|TITULO_ELEITOR|IDENTIDADE_FUNCIONAL|CERTIFICADO_DIPLOMA|CIN|PASSAPORTE|CARTEIRA_CONSELHO|CERTIFICADO_RESERVISTA|CARTAO_SUS|CARTEIRA_ESTUDANTE_DNE|OUTROS>",\n'
+            '    "tipo": "<RG|CNH|CTPS|CPF|CASAMENTO|NASCIMENTO|OBITO|ESCRITURA|IPTU|CERTIDAO_IMOVEL|TITULO_ELEITOR|IDENTIDADE_FUNCIONAL|CERTIFICADO_DIPLOMA|CIN|PASSAPORTE|CARTEIRA_CONSELHO|CERTIFICADO_RESERVISTA|CARTAO_SUS|CARTEIRA_ESTUDANTE_DNE|OUTROS>",\n'
             '    "pessoa": {\n'
             '      "nome_completo": "...",\n'
             '      "cpf": "...",\n'
@@ -124,7 +231,7 @@ class GeminiExtractor:
             '      "nome_pais": ["...", "..."],\n'
             '      "data_obito": "..." (apenas se certidão de óbito)\n'
             '    },\n'
-            '    ... demais campos pertinentes ao tipo específico ...\n'
+            '    ... demais campos pertinentes ao tipo específico (ex: cartorio, matricula, livro, folha, termo, naturalidade, conjuges, regime_bens, data_casamento, compradores, vendedores, imovel, contribuinte, numero_titulo, zona, secao, municipio, uf, orgao_emissor, numero_registro, numero_passaporte, codigo_mrz, numero_ra, numero_cns, instituicao_ensino, curso) ...\n'
             '  },\n'
             '  "confianca": 95,\n'
             '  "observacoes": null\n'
@@ -154,20 +261,7 @@ class GeminiExtractor:
                 raise ValueError("API retornou uma resposta vazia.")
 
             data_dict = json.loads(response.text)
-
-            # Normalização de chave raiz caso o modelo devolva os dados direto na raiz
-            if "documento" not in data_dict and "tipo" in data_dict:
-                data_dict = {
-                    "documento": data_dict,
-                    "confianca": 90,
-                    "observacoes": None
-                }
-            elif "documento" not in data_dict:
-                data_dict = {
-                    "documento": {"tipo": "OUTROS", **data_dict},
-                    "confianca": 80,
-                    "observacoes": None
-                }
+            data_dict = self._normalize_doc_dict(data_dict, masked_text)
 
             # Valida e converte para os modelos Pydantic
             try:
@@ -175,26 +269,62 @@ class GeminiExtractor:
                 return document_obj
             except ValidationError as ve:
                 # [Opus - v1.0 Multi-Doc]: Fallback resiliente caso o Gemini tenha variado nomes de campos menores
+                # [Opus - Security Audit (Item 6)]: Preserva 'nome_pais' e TODOS os campos extras do documento
+                # (cartorio, matricula, numero_cns, conjuges, etc.) via GenericDocument(extra="allow").
                 doc_raw = data_dict.get("documento", {})
-                tipo_raw = doc_raw.get("tipo", "OUTROS") if isinstance(doc_raw, dict) else "OUTROS"
+                if not isinstance(doc_raw, dict):
+                    doc_raw = {}
+                tipo_raw = str(doc_raw.get("tipo", "OUTROS")).upper()
                 from .models_gemini import GenericDocument, Person
-                pessoa_dict = doc_raw.get("pessoa", {}) if isinstance(doc_raw, dict) else {}
+                pessoa_dict = doc_raw.get("pessoa")
+                if not isinstance(pessoa_dict, dict):
+                    # Tenta recuperar pessoa principal de conjuges, compradores ou contribuinte
+                    if isinstance(doc_raw.get("conjuges"), list) and doc_raw["conjuges"] and isinstance(doc_raw["conjuges"][0], dict):
+                        pessoa_dict = doc_raw["conjuges"][0]
+                    elif isinstance(doc_raw.get("compradores"), list) and doc_raw["compradores"] and isinstance(doc_raw["compradores"][0], dict):
+                        pessoa_dict = doc_raw["compradores"][0]
+                    elif isinstance(doc_raw.get("contribuinte"), dict):
+                        pessoa_dict = doc_raw["contribuinte"]
+                    else:
+                        pessoa_dict = {}
+
+                raw_pais = pessoa_dict.get("nome_pais")
+                if isinstance(raw_pais, str):
+                    nome_pais_list = [raw_pais]
+                elif isinstance(raw_pais, list):
+                    nome_pais_list = [str(p) for p in raw_pais if p]
+                else:
+                    nome_pais_list = None
+
                 p_obj = Person(
-                    nome_completo=pessoa_dict.get("nome_completo") if isinstance(pessoa_dict, dict) else None,
-                    cpf=pessoa_dict.get("cpf") if isinstance(pessoa_dict, dict) else None,
-                    rg=pessoa_dict.get("rg") if isinstance(pessoa_dict, dict) else None,
-                    data_nascimento=pessoa_dict.get("data_nascimento") if isinstance(pessoa_dict, dict) else None,
-                    data_obito=pessoa_dict.get("data_obito") if isinstance(pessoa_dict, dict) else None,
-                ) if isinstance(pessoa_dict, dict) else None
+                    nome_completo=pessoa_dict.get("nome_completo"),
+                    cpf=pessoa_dict.get("cpf"),
+                    rg=pessoa_dict.get("rg"),
+                    data_nascimento=pessoa_dict.get("data_nascimento"),
+                    nome_pais=nome_pais_list,
+                    data_obito=pessoa_dict.get("data_obito"),
+                ) if pessoa_dict else None
+
+                extra_fields = {
+                    k: v for k, v in doc_raw.items()
+                    if k not in ("tipo", "titulo", "pessoa", "campos_extras") and v is not None
+                }
+                campos_extras_str = {
+                    k: (json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v))
+                    for k, v in extra_fields.items()
+                } or None
+
                 generic = GenericDocument(
                     tipo=tipo_raw,
-                    titulo=doc_raw.get("titulo") if isinstance(doc_raw, dict) else f"Documento {tipo_raw}",
-                    pessoa=p_obj
+                    titulo=doc_raw.get("titulo") or f"DOCUMENTO {tipo_raw}",
+                    pessoa=p_obj,
+                    campos_extras=campos_extras_str,
+                    **extra_fields,
                 )
                 return ExtractedDocument(
                     documento=generic,
                     confianca=int(data_dict.get("confianca", 75)) if isinstance(data_dict.get("confianca"), (int, float)) else 75,
-                    observacoes=data_dict.get("observacoes") or "Processado via schema adaptativo"
+                    observacoes=data_dict.get("observacoes") or "PROCESSADO VIA SCHEMA ADAPTATIVO"
                 )
 
         except Exception as e:

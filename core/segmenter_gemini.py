@@ -31,7 +31,10 @@ PAGE_MARKER_FMT = "<<<PAGINA_{n}>>>"
 _PAGE_MARKER_RE = re.compile(r"<<<PAGINA_(\d+)>>>")
 
 # Máximo de caracteres de cada página enviados para a segmentação (controla custo).
-_MAX_CHARS_PER_PAGE = 1200
+# [Opus - Security Audit (Item 9)]: Ampliado para 1500 caracteres (cabeçalho + rodapé) sem duplicata PSM 6.
+_MAX_CHARS_PER_PAGE = 1500
+_HEAD_CHARS = 1050
+_TAIL_CHARS = 450
 
 
 class PageSegment(BaseModel):
@@ -45,8 +48,16 @@ class SegmentationResult(BaseModel):
 
 
 def join_pages_with_markers(pages: list[str]) -> str:
-    """Junta as páginas num texto único com marcadores, para mascarar o arquivo todo de uma vez."""
-    return "\n".join(f"{PAGE_MARKER_FMT.format(n=i + 1)}\n{text}" for i, text in enumerate(pages))
+    """
+    Junta as páginas num texto único com marcadores, para mascarar o arquivo todo de uma vez.
+    # [Opus - Security Audit (Item 9)]: Sanitiza eventuais padrões '<<<PAGINA_X>>>' pré-existentes
+    # no texto bruto do documento para impedir colisão ou injeção de marcadores no split_masked_text.
+    """
+    sanitized_pages = [
+        _PAGE_MARKER_RE.sub(r"[PAGINA_DOC_\1]", text or "")
+        for text in pages
+    ]
+    return "\n".join(f"{PAGE_MARKER_FMT.format(n=i + 1)}\n{text}" for i, text in enumerate(sanitized_pages))
 
 
 def split_masked_text(masked_text: str, num_pages: int) -> list[str]:
@@ -59,6 +70,24 @@ def split_masked_text(masked_text: str, num_pages: int) -> list[str]:
         if 0 <= idx < num_pages:
             pages[idx] = parts[i + 1].strip()
     return pages
+
+
+def _build_page_snippet(text: str) -> str:
+    """
+    # [Opus - Security Audit (Item 9)]: Remove a seção duplicada do OCR ('=== SEGMENTAÇÃO EM BLOCO ===')
+    # para não desperdiçar janela de contexto na segmentação, e preserva tanto o topo (cabeçalho)
+    # quanto o rodapé (assinaturas, numeração de folha 'Página 1/3', MRZ) de páginas longas.
+    """
+    if not text:
+        return "(página sem texto legível)"
+    # Remove a segunda passagem redundante do OCR (PSM 6) apenas no resumo do segmentador
+    primary_text = text.split("=== SEGMENTAÇÃO EM BLOCO ===")[0]
+    cleaned = re.sub(r"\n{3,}", "\n\n", primary_text).strip()
+    if not cleaned:
+        return "(página sem texto legível)"
+    if len(cleaned) <= _MAX_CHARS_PER_PAGE:
+        return cleaned
+    return f"{cleaned[:_HEAD_CHARS]}\n[...]\n{cleaned[-_TAIL_CHARS:]}"
 
 
 def normalize_segments(segments: list[PageSegment], num_pages: int) -> list[tuple[int, int, str]]:
@@ -116,7 +145,7 @@ class DocumentSegmenter:
 
         blocks = []
         for i, text in enumerate(masked_pages):
-            snippet = re.sub(r"\n{3,}", "\n\n", text).strip()[:_MAX_CHARS_PER_PAGE] or "(página sem texto legível)"
+            snippet = _build_page_snippet(text)
             blocks.append(f"=== PÁGINA {i + 1} ===\n{snippet}")
         prompt = (
             f"O arquivo tem {n} páginas. Devolva a divisão em documentos.\n\n" + "\n\n".join(blocks)

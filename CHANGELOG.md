@@ -2,6 +2,33 @@
 
 ---
 
+## v1.0.2 — "Blindagem LGPD, Padronização em Caixa Alta & Integridade de Dados" (Outubro/2026)
+
+> [Opus - Security Audit]
+
+### 🔒 Segurança e Mascaramento LGPD (`core/masker_gemini.py`)
+- **Mascaramento de MRZ e Novos Documentos:** Adicionados padrões dedicados para linhas MRZ (`[MRZ_xxx]`), Passaporte (`[PASSAPORTE_xxx]`), Cartão SUS/CNS (`[CNS_xxx]`), Título de Eleitor (`[TITULO_xxx]`), RA Militar (`[RA_xxx]`), Matrícula de Certidão Civil de 32 dígitos (`[MATRICULA_xxx]`) e Conselhos Profissionais OAB/CRM/CREA (`[REGISTRO_xxx]`).
+- **Filiação Multilinha e Sobrenomes Compostos:** Captura completa do 1º e 2º genitores em blocos `FILIAÇÃO` multilinha (RG/CNH/CIN), suporte a sobrenomes com apóstrofo/hífen (`D'AVILA`, `SANT'ANNA`, `ESPIRITO-SANTO`) e filtro contra over-masking de cabeçalhos institucionais.
+- **Proteção de Fronteiras de CPF:** Suporte a CPFs com quebra de linha ou espaços de OCR e proteção com lookarounds para impedir que regexes de Telefone ou RG fatiem números de CPF, CNS ou Matrícula.
+- **Deduplicação Inteligente de Tokens:** O mesmo nome ou documento recebe sempre o mesmo token (`[NOME_001]`, `[CPF_001]`) ao longo de todas as páginas e passagens do OCR.
+
+### 🧠 Interpretação IA, Caixa Alta e Persistência (`core/extractor_gemini.py`, `core/models_gemini.py`, `core/segmenter_gemini.py`, `ui/sessions_page_gemini.py`)
+- **Padronização Total em LETRAS MAIÚSCULAS:** Todos os dados extraídos, desmascarados e editados na interface são automaticamente convertidos para CAIXA ALTA, com desmascaramento tolerante a variações de caixa/espaços nos tokens.
+- **Alinhamento de Schemas e Fallback Resiliente:** Sincronização automática de `pessoa` com `conjuges`, `compradores` e `contribuinte`, além de preservação integral de `nome_pais` e campos extras (`extra="allow"`).
+- **Correção na Edição e Salvamento em Sessões:** Desmascaramento completo do payload antes de persistir edições no SQLite e proteção contra sobrescrita de `cartorio` por resumos sintéticos.
+- **Proteção do Segmentador Multi-Documento:** Sanitização de marcadores de página e resumo otimizado (cabeçalho + rodapé sem duplicata PSM 6).
+
+### 🪪 Reconhecimento de CPF em RG/CNH de diferentes épocas (`core/ocr_local_gemini.py`, `core/masker_gemini.py`, `core/extractor_gemini.py`)
+- **OCR em 3 passadas:** Nova leitura sem filtro de contraste/nitidez (PSM 6) para preservar CPF e nome sobre fundos de segurança (guilloche).
+- **Formatos históricos de CPF:** Suporte a `123.456.789/00`, `123456789-00`, `123456789/00`, ruído de OCR (`123. 456: 789-09`) e rótulos corrompidos (`CRE`, `CPR`, `CPE`, `4D CPF`).
+- **Validação Módulo 11:** CPFs de 11 dígitos sem rótulo só são aceitos se os dígitos verificadores forem válidos; valor salvo sempre no formato `XXX.XXX.XXX-XX`.
+- **Fallback determinístico:** Em documentos de titular único, `[CPF_001]` presente no texto é atribuído a `pessoa.cpf` mesmo se o modelo o omitir.
+
+### 🖥️ Interface (`ui/sessions_page_gemini.py`)
+- Removido o menu superior redundante de cartões de documentos; adicionado botão 🗑️ de exclusão na tabela, antes da coluna de ordem (`Nº`).
+
+---
+
 ## v1.0.1 — "Multi-Documento" (Outubro/2026)
 
 > [Opus - v1.0 Multi-Doc]

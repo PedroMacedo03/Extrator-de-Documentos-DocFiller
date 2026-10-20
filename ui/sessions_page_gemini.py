@@ -95,6 +95,102 @@ def resolve_doc_path(file_path: str) -> Optional[Path]:
     return None
 
 
+def _get_primary_person(dados: dict, doc_type: str = "") -> dict:
+    """
+    # [Opus - Security Audit (Item 7)]: Resolve de forma unificada o dicionário da pessoa
+    # principal em qualquer tipo de documento (pessoa, conjuges[0], compradores[0], contribuinte, proprietarios[0]).
+    """
+    if not isinstance(dados, dict):
+        return {}
+    pessoa = dados.get("pessoa")
+    if isinstance(pessoa, dict) and any(pessoa.values()):
+        return pessoa
+    if isinstance(dados.get("conjuges"), list) and dados["conjuges"] and isinstance(dados["conjuges"][0], dict):
+        return dados["conjuges"][0]
+    if isinstance(dados.get("compradores"), list) and dados["compradores"] and isinstance(dados["compradores"][0], dict):
+        return dados["compradores"][0]
+    if isinstance(dados.get("contribuinte"), dict) and any(dados["contribuinte"].values()):
+        return dados["contribuinte"]
+    if isinstance(dados.get("proprietarios"), list) and dados["proprietarios"] and isinstance(dados["proprietarios"][0], dict):
+        return dados["proprietarios"][0]
+    return pessoa if isinstance(pessoa, dict) else {}
+
+
+def _update_primary_person(dados: dict, person_fields: dict, doc_type: str = "") -> None:
+    """
+    # [Opus - Security Audit (Item 7 & Item 8)]: Atualiza os dados da pessoa principal mantendo
+    # sincronia entre 'pessoa' e estruturas específicas ('conjuges[0]', 'compradores[0]', 'contribuinte').
+    """
+    if not isinstance(dados, dict):
+        return
+    if "pessoa" not in dados or not isinstance(dados["pessoa"], dict):
+        dados["pessoa"] = {}
+    dados["pessoa"].update(person_fields)
+
+    if isinstance(dados.get("conjuges"), list) and dados["conjuges"] and isinstance(dados["conjuges"][0], dict):
+        dados["conjuges"][0].update(person_fields)
+    if isinstance(dados.get("compradores"), list) and dados["compradores"] and isinstance(dados["compradores"][0], dict):
+        dados["compradores"][0].update(person_fields)
+    if isinstance(dados.get("contribuinte"), dict):
+        dados["contribuinte"].update(person_fields)
+    if isinstance(dados.get("proprietarios"), list) and dados["proprietarios"] and isinstance(dados["proprietarios"][0], dict):
+        dados["proprietarios"][0].update(person_fields)
+
+
+def _compute_registro_summary(dados: dict, doc_type: str) -> str:
+    """
+    # [Opus - Security Audit (Item 7 & Item 8)]: Gera o resumo da coluna 'Cartório / Registro'
+    # em LETRAS MAIÚSCULAS sem poluir 'dados["cartorio"]' de documentos não-cartorários.
+    """
+    if not isinstance(dados, dict):
+        return "-"
+    cartorio = dados.get("cartorio") or dados.get("matricula")
+    if not cartorio:
+        doc_type_upper = str(doc_type or "").upper()
+        if "TITULO" in doc_type_upper or "ELEITOR" in doc_type_upper:
+            z = dados.get("zona")
+            s = dados.get("secao")
+            u = dados.get("uf")
+            num = dados.get("numero_titulo")
+            if z and s:
+                cartorio = f"ZONA {z} / SEÇÃO {s} ({u or '-'})"
+            elif num:
+                cartorio = f"TÍTULO: {num}"
+        elif "CIN" in doc_type_upper:
+            org = dados.get("orgao_emissor") or "POLÍCIA CIVIL"
+            uf = dados.get("uf_emissor") or ""
+            cartorio = f"CIN ({org}/{uf})" if uf else f"CIN ({org})"
+        elif "PASSAPORTE" in doc_type_upper:
+            num = dados.get("numero_passaporte") or "-"
+            pais_em = dados.get("pais_emissor") or "BRA"
+            cartorio = f"PASSAPORTE {num} ({pais_em})"
+        elif "CONSELHO" in doc_type_upper or "ORDEM" in doc_type_upper:
+            org = dados.get("orgao_conselho") or "CONSELHO"
+            num = dados.get("numero_registro") or ""
+            uf = dados.get("seccional_uf") or ""
+            cartorio = f"{org}/{uf} {num}".strip() if uf else f"{org} {num}".strip()
+        elif "RESERVISTA" in doc_type_upper:
+            ra = dados.get("numero_ra") or dados.get("numero_certificado") or "-"
+            forca = dados.get("forca_armada") or "DEFESA"
+            cartorio = f"RESERVISTA {forca} (RA: {ra})"
+        elif "SUS" in doc_type_upper:
+            cns = dados.get("numero_cns") or "-"
+            cartorio = f"SUS CNS: {cns}"
+        elif "ESTUDANTE" in doc_type_upper or "DNE" in doc_type_upper:
+            inst = dados.get("instituicao_ensino") or "INST."
+            cur = dados.get("curso") or ""
+            cartorio = f"DNE {inst} ({cur})" if cur else f"DNE {inst}"
+        elif "FUNCIONAL" in doc_type_upper or "MILITAR" in doc_type_upper:
+            org = dados.get("orgao_emissor") or "ÓRGÃO"
+            reg = dados.get("numero_registro") or dados.get("posto_graduacao_cargo")
+            cartorio = f"{org} ({reg})" if reg else org
+        elif "CERTIFICADO" in doc_type_upper or "DIPLOMA" in doc_type_upper:
+            inst = dados.get("instituicao_ensino") or "INST."
+            cur = dados.get("curso")
+            cartorio = f"{inst} - {cur}" if cur else inst
+    return str(cartorio).upper() if cartorio else "-"
+
+
 # =====================================================================
 # MODAL: Ficha Completa do Documento (Detalhes e JSON)
 # =====================================================================
@@ -121,15 +217,8 @@ class DocumentDetailDialog(QDialog):
         c_layout.setSpacing(15)
         
         # 1. Dados Pessoais
-        pessoa = dados.get("pessoa") or {}
-        if not pessoa and doc_type == "CASAMENTO" and "conjuges" in dados:
-            conjuges = dados.get("conjuges") or []
-            pessoa = conjuges[0] if (conjuges and isinstance(conjuges[0], dict)) else {}
-        if not pessoa and doc_type == "ESCRITURA" and "compradores" in dados:
-            compradores = dados.get("compradores") or []
-            pessoa = compradores[0] if (compradores and isinstance(compradores[0], dict)) else {}
-        if not isinstance(pessoa, dict):
-            pessoa = {}
+        # [Opus - Security Audit (Item 7)]: Usa resolvedor unificado de pessoa principal
+        pessoa = _get_primary_person(dados, doc_type)
             
         p_card = CardWidget(content)
         p_layout = QVBoxLayout(p_card)
@@ -368,10 +457,11 @@ class DocumentDetailDialog(QDialog):
 # =====================================================================
 class EditDocumentDataDialog(QDialog):
     """Permite editar os principais campos extraídos de um documento."""
-    def __init__(self, doc_id: int, file_name: str, dados: dict, parent=None):
+    def __init__(self, doc_id: int, file_name: str, dados: dict, doc_type: str = "", parent=None):
         super().__init__(parent)
         self.doc_id = doc_id
         self.dados = dados
+        self.doc_type = doc_type
         self.setWindowTitle(f"✏️ Editar Dados — {file_name}")
         self.resize(600, 480)
         
@@ -385,30 +475,28 @@ class EditDocumentDataDialog(QDialog):
         form_layout = QFormLayout()
         form_layout.setSpacing(10)
         
-        # Extrai referências existentes
-        pessoa = self.dados.get("pessoa") or {}
-        if not isinstance(pessoa, dict):
-            pessoa = {}
+        # [Opus - Security Audit (Item 7)]: Extrai referências existentes de qualquer estrutura (pessoa, conjuges, compradores, contribuinte)
+        pessoa = _get_primary_person(self.dados, self.doc_type)
             
         self.edit_nome = LineEdit(self)
-        self.edit_nome.setText(pessoa.get("nome_completo", ""))
+        self.edit_nome.setText(str(pessoa.get("nome_completo") or "").upper())
         form_layout.addRow("Nome Completo:", self.edit_nome)
         
         self.edit_cpf = LineEdit(self)
-        self.edit_cpf.setText(pessoa.get("cpf", ""))
+        self.edit_cpf.setText(str(pessoa.get("cpf") or "").upper())
         form_layout.addRow("CPF:", self.edit_cpf)
         
         self.edit_rg = LineEdit(self)
-        self.edit_rg.setText(pessoa.get("rg", ""))
+        self.edit_rg.setText(str(pessoa.get("rg") or "").upper())
         form_layout.addRow("RG:", self.edit_rg)
         
         self.edit_nasc = LineEdit(self)
-        self.edit_nasc.setText(pessoa.get("data_nascimento", ""))
+        self.edit_nasc.setText(str(pessoa.get("data_nascimento") or "").upper())
         form_layout.addRow("Data Nascimento:", self.edit_nasc)
         
         pais = pessoa.get("nome_pais", []) or []
-        mae = pais[1] if len(pais) > 1 else (pais[0] if len(pais) == 1 else "")
-        pai = pais[0] if len(pais) > 1 else ""
+        mae = str(pais[1] if len(pais) > 1 else (pais[0] if len(pais) == 1 else "")).upper()
+        pai = str(pais[0] if len(pais) > 1 else "").upper()
         
         self.edit_mae = LineEdit(self)
         self.edit_mae.setText(mae)
@@ -418,8 +506,9 @@ class EditDocumentDataDialog(QDialog):
         self.edit_pai.setText(pai)
         form_layout.addRow("Nome do Pai:", self.edit_pai)
         
+        self._initial_cartorio = str(self.dados.get("cartorio") or self.dados.get("matricula") or "").upper()
         self.edit_cartorio = LineEdit(self)
-        self.edit_cartorio.setText(self.dados.get("cartorio") or self.dados.get("matricula") or "")
+        self.edit_cartorio.setText(self._initial_cartorio)
         form_layout.addRow("Cartório / Matrícula:", self.edit_cartorio)
         
         layout.addLayout(form_layout)
@@ -439,25 +528,29 @@ class EditDocumentDataDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def save_and_accept(self):
-        """Atualiza o dicionário de dados em memória."""
-        if "pessoa" not in self.dados or not isinstance(self.dados["pessoa"], dict):
-            self.dados["pessoa"] = {}
-            
-        self.dados["pessoa"]["nome_completo"] = self.edit_nome.text().strip()
-        self.dados["pessoa"]["cpf"] = self.edit_cpf.text().strip()
-        self.dados["pessoa"]["rg"] = self.edit_rg.text().strip()
-        self.dados["pessoa"]["data_nascimento"] = self.edit_nasc.text().strip()
-        
-        # Filiação
+        """
+        Atualiza o dicionário de dados em memória.
+        # [Opus - Security Audit (Item 7 & Item 8)]: Converte entradas para CAIXA ALTA e sincroniza
+        # com pessoa, conjuges[0], compradores[0] e contribuinte.
+        """
         pais = []
         if self.edit_pai.text().strip():
-            pais.append(self.edit_pai.text().strip())
+            pais.append(self.edit_pai.text().strip().upper())
         if self.edit_mae.text().strip():
-            pais.append(self.edit_mae.text().strip())
-        self.dados["pessoa"]["nome_pais"] = pais
+            pais.append(self.edit_mae.text().strip().upper())
+
+        person_fields = {
+            "nome_completo": self.edit_nome.text().strip().upper(),
+            "cpf": self.edit_cpf.text().strip().upper(),
+            "rg": self.edit_rg.text().strip().upper(),
+            "data_nascimento": self.edit_nasc.text().strip().upper(),
+            "nome_pais": pais,
+        }
+        _update_primary_person(self.dados, person_fields, self.doc_type)
         
-        if self.edit_cartorio.text().strip():
-            self.dados["cartorio"] = self.edit_cartorio.text().strip()
+        cartorio_val = self.edit_cartorio.text().strip().upper()
+        if cartorio_val:
+            self.dados["cartorio"] = cartorio_val
             
         self.accept()
 
@@ -880,7 +973,9 @@ class SessionsPage(QWidget):
         left_layout.addLayout(sess_actions)
         
         # -------------------------------------------------------------
-        # PAINEL DIREITO: Visão Natural da Sessão (Anexos + Visualizador + Tabela)
+        # PAINEL DIREITO: Visualizador de Prévia (Topo) + Tabela Consolidada (Base)
+        # [Opus - UI Cleanup]: Removido o menu superior de fichas/chips redundante;
+        # unificadas todas as ações e exclusão diretamente na tabela inferior.
         # -------------------------------------------------------------
         right_panel = QWidget(self.splitter)
         right_panel.setMinimumWidth(380)
@@ -888,68 +983,36 @@ class SessionsPage(QWidget):
         right_layout.setContentsMargins(8, 0, 0, 0)
         right_layout.setSpacing(10)
         
-        # 1. CARTÃO SUPERIOR: Cabeçalho da Sessão e Fichas/Chips de Documentos Anexados
-        # Fixado no topo, compacto e responsivo
-        self.session_header_card = CardWidget(right_panel)
-        self.session_header_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-        header_card_layout = QVBoxLayout(self.session_header_card)
-        header_card_layout.setContentsMargins(14, 10, 14, 10)
-        header_card_layout.setSpacing(8)
-        
-        # Linha 1: Título da Sessão, Metadados e Ações Rápidas
-        meta_row = QHBoxLayout()
-        self.lbl_session_title = SubtitleLabel("Selecione uma Sessão", self.session_header_card)
-        meta_row.addWidget(self.lbl_session_title)
-        meta_row.addStretch(1)
-        
-        self.lbl_session_meta = BodyLabel("", self.session_header_card)
-        self.lbl_session_meta.setStyleSheet("color: #888;")
-        meta_row.addWidget(self.lbl_session_meta)
-
-        self.btn_toggle_preview = PushButton("👁️ Ocultar Prévia", self.session_header_card)
-        self.btn_toggle_preview.setToolTip("Alternar exibição do visualizador de documentos")
-        self.btn_toggle_preview.clicked.connect(self.toggle_preview_visibility)
-        meta_row.addWidget(self.btn_toggle_preview)
-
-        header_card_layout.addLayout(meta_row)
-        
-        # Linha 2: Área de Fichas/Chips dos Documentos Anexados (com Scroll Horizontal leve)
-        self.docs_scroll = QScrollArea(self.session_header_card)
-        self.docs_scroll.setWidgetResizable(True)
-        self.docs_scroll.setFrameShape(QFrame.NoFrame)
-        self.docs_scroll.setFixedHeight(90)
-        self.docs_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.docs_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        
-        self.docs_container = QWidget()
-        self.docs_layout = QHBoxLayout(self.docs_container)
-        self.docs_layout.setContentsMargins(0, 0, 0, 0)
-        self.docs_layout.setSpacing(10)
-        self.docs_scroll.setWidget(self.docs_container)
-        header_card_layout.addWidget(self.docs_scroll)
-        
-        right_layout.addWidget(self.session_header_card)
-        
-        # 2. QSplitter VERTICAL: Visualizador de Documentos (Topo) + Tabela de Dados (Base)
+        # QSplitter VERTICAL: Visualizador de Documentos (Topo) + Tabela de Dados (Base)
         # Permite ao usuário arrastar para aumentar a prévia ou a tabela!
         self.right_splitter = QSplitter(Qt.Vertical, right_panel)
         self.right_splitter.setHandleWidth(6)
         self.right_splitter.setChildrenCollapsible(False)
 
-        # 2a. Visualizador de Prévia do Documento
+        # 1. Visualizador de Prévia do Documento
         self.preview_widget = DocumentPreviewWidget(self.right_splitter)
         self.preview_widget.close_requested.connect(self.toggle_preview_visibility)
         self.right_splitter.addWidget(self.preview_widget)
 
-        # 2b. SEÇÃO PRINCIPAL: Tabela Espaçosa de Dados Extraídos e Consolidados
+        # 2. SEÇÃO PRINCIPAL: Tabela Espaçosa de Dados Extraídos e Consolidados
         table_container = QWidget(self.right_splitter)
         table_layout = QVBoxLayout(table_container)
         table_layout.setContentsMargins(0, 2, 0, 0)
         table_layout.setSpacing(8)
 
         data_header = QHBoxLayout()
-        data_header.addWidget(SubtitleLabel("📊 Dados Extraídos e Consolidados:", table_container))
+        self.lbl_session_title = SubtitleLabel("📊 Dados Extraídos e Consolidados:", table_container)
+        data_header.addWidget(self.lbl_session_title)
+        
+        self.lbl_session_meta = BodyLabel("", table_container)
+        self.lbl_session_meta.setStyleSheet("color: #888; margin-left: 8px;")
+        data_header.addWidget(self.lbl_session_meta)
         data_header.addStretch(1)
+
+        self.btn_view_details = PushButton("👁️ Ver Ficha", table_container)
+        self.btn_view_details.setToolTip("Abrir ficha completa e JSON do documento selecionado")
+        self.btn_view_details.clicked.connect(self.view_selected_document_details)
+        data_header.addWidget(self.btn_view_details)
         
         self.btn_edit_data = PushButton("✏️ Editar Linha", table_container)
         self.btn_edit_data.clicked.connect(self.edit_selected_data)
@@ -962,6 +1025,11 @@ class SessionsPage(QWidget):
         self.btn_copy_cell = PushButton("📋 Copiar Célula (Ctrl+C)", table_container)
         self.btn_copy_cell.clicked.connect(self.copy_selected_cell)
         data_header.addWidget(self.btn_copy_cell)
+
+        self.btn_toggle_preview = PushButton("👁️ Ocultar Prévia", table_container)
+        self.btn_toggle_preview.setToolTip("Alternar exibição do visualizador de documentos")
+        self.btn_toggle_preview.clicked.connect(self.toggle_preview_visibility)
+        data_header.addWidget(self.btn_toggle_preview)
         
         table_layout.addLayout(data_header)
         
@@ -973,9 +1041,12 @@ class SessionsPage(QWidget):
         self.table_data.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table_data.customContextMenuRequested.connect(self.show_context_menu)
         self.table_data.itemSelectionChanged.connect(self._on_table_selection_changed)
+        # [Opus - UI Cleanup]: Oculta o cabeçalho vertical nativo para que o botão Excluir
+        # fique na 1ª coluna, imediatamente antes da coluna 'Nº' (enumeração dos documentos).
+        self.table_data.verticalHeader().setVisible(False)
         
         self.data_columns = [
-            "ID Doc", "Arquivo Origem", "Tipo", "Nome Completo", 
+            "", "Nº", "Arquivo Origem", "Tipo", "Nome Completo", 
             "CPF", "RG", "Data Nasc.", "Nome da Mãe", "Nome do Pai", "Cartório / Registro"
         ]
         self.table_data.setColumnCount(len(self.data_columns))
@@ -983,13 +1054,15 @@ class SessionsPage(QWidget):
         
         header = self.table_data.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        self.table_data.setColumnWidth(0, 44)
         header.setStretchLastSection(True)
         
         table_layout.addWidget(self.table_data)
         self.right_splitter.addWidget(table_container)
 
-        # Proporções verticais: Prévia (380px) / Tabela (260px)
-        self.right_splitter.setSizes([380, 260])
+        # Proporções verticais: Prévia (440px) / Tabela (300px)
+        self.right_splitter.setSizes([440, 300])
         right_layout.addWidget(self.right_splitter, 1)
         
         # Configuração do Splitter Horizontal Principal
@@ -1041,10 +1114,11 @@ class SessionsPage(QWidget):
             self.on_session_selected(first_item)
         else:
             self.current_session_id = None
+            self._active_doc_id = None
             self.table_data.setRowCount(0)
-            self.lbl_session_title.setText("Nenhuma sessão encontrada.")
+            self.lbl_session_title.setText("📊 Dados Extraídos e Consolidados:")
             self.lbl_session_meta.setText("")
-            self._render_document_cards([])
+            self.preview_widget.clear_document()
 
     def on_search_changed(self, text: str):
         """Filtra as sessões conforme o usuário digita."""
@@ -1062,24 +1136,22 @@ class SessionsPage(QWidget):
         updated = session.get("updated_at") or session.get("created_at") if session else ""
         date_str = format_datetime_br(updated)
         
-        self.lbl_session_title.setText(f"📁 {session_name}")
+        self.lbl_session_title.setText(f"📊 {session_name}")
         self.lbl_session_meta.setText(f"🕒 Atualizado: {date_str}")
         
         self._load_session_content(session_id)
 
     def _load_session_content(self, session_id: int):
-        """Carrega documentos e dados da sessão ativa."""
+        """Carrega documentos e dados da sessão ativa diretamente na tabela inferior."""
         self.table_data.blockSignals(True)
         self.table_data.setRowCount(0)
         self._current_extractions.clear()
+        self._doc_chip_widgets.clear()
         
         extractions = self.db.get_session_extractions(session_id)
         self._current_extractions = extractions
         
-        # 1. Renderiza os cartões de documentos anexados de forma natural
-        self._render_document_cards(extractions)
-        
-        # 2. Popula a tabela de dados extraídos
+        # Popula a tabela de dados extraídos (com botão Excluir antes da enumeração Nº)
         for idx, row in enumerate(extractions):
             raw_json = row.get("extracted_data_json", "{}")
             try:
@@ -1091,190 +1163,75 @@ class SessionsPage(QWidget):
             except Exception:
                 dados = {}
                 
-            # Extrai pessoa principal
-            pessoa = dados.get("pessoa") or {}
-            if not pessoa and row["document_type"] == "CASAMENTO" and "conjuges" in dados:
-                conjuges = dados.get("conjuges") or []
-                pessoa = conjuges[0] if (conjuges and isinstance(conjuges[0], dict)) else {}
-            if not pessoa and row["document_type"] == "ESCRITURA" and "compradores" in dados:
-                compradores = dados.get("compradores") or []
-                pessoa = compradores[0] if (compradores and isinstance(compradores[0], dict)) else {}
-            if not pessoa and row["document_type"] == "IPTU" and "contribuinte" in dados:
-                pessoa = dados.get("contribuinte") or {}
-            if not isinstance(pessoa, dict):
-                pessoa = {}
+            # [Opus - Security Audit (Item 7 & Item 8)]: Extrai pessoa principal e resumo de registro em CAIXA ALTA
+            pessoa = _get_primary_person(dados, row.get("document_type", ""))
                 
-            nome = pessoa.get("nome_completo", "-") or "-"
-            cpf = pessoa.get("cpf", "-") or "-"
-            rg = pessoa.get("rg", "-") or "-"
-            nasc = pessoa.get("data_nascimento", "-") or "-"
+            nome = str(pessoa.get("nome_completo") or "-").upper()
+            cpf = str(pessoa.get("cpf") or "-").upper()
+            rg = str(pessoa.get("rg") or "-").upper()
+            nasc = str(pessoa.get("data_nascimento") or "-").upper()
             
             pais = pessoa.get("nome_pais", []) or []
-            mae = pais[1] if len(pais) > 1 else (pais[0] if len(pais) == 1 else "-")
-            pai = pais[0] if len(pais) > 1 else "-"
-            cartorio = dados.get("cartorio") or dados.get("matricula")
-            if not cartorio:
-                doc_type_upper = str(row.get("document_type", "")).upper()
-                if "TITULO" in doc_type_upper or "ELEITOR" in doc_type_upper:
-                    z = dados.get("zona")
-                    s = dados.get("secao")
-                    u = dados.get("uf")
-                    num = dados.get("numero_titulo")
-                    if z and s:
-                        cartorio = f"Zona {z} / Seção {s} ({u or '-'})"
-                    elif num:
-                        cartorio = f"Título: {num}"
-                elif "CIN" in doc_type_upper:
-                    org = dados.get("orgao_emissor") or "Polícia Civil"
-                    uf = dados.get("uf_emissor") or ""
-                    cartorio = f"CIN ({org}/{uf})" if uf else f"CIN ({org})"
-                elif "PASSAPORTE" in doc_type_upper:
-                    num = dados.get("numero_passaporte") or "-"
-                    pais = dados.get("pais_emissor") or "BRA"
-                    cartorio = f"Passaporte {num} ({pais})"
-                elif "CONSELHO" in doc_type_upper or "ORDEM" in doc_type_upper:
-                    org = dados.get("orgao_conselho") or "Conselho"
-                    num = dados.get("numero_registro") or ""
-                    uf = dados.get("seccional_uf") or ""
-                    cartorio = f"{org}/{uf} {num}" if uf else f"{org} {num}"
-                elif "RESERVISTA" in doc_type_upper:
-                    ra = dados.get("numero_ra") or dados.get("numero_certificado") or "-"
-                    forca = dados.get("forca_armada") or "Defesa"
-                    cartorio = f"Reservista {forca} (RA: {ra})"
-                elif "SUS" in doc_type_upper:
-                    cns = dados.get("numero_cns") or "-"
-                    cartorio = f"SUS CNS: {cns}"
-                elif "ESTUDANTE" in doc_type_upper or "DNE" in doc_type_upper:
-                    inst = dados.get("instituicao_ensino") or "Inst."
-                    cur = dados.get("curso") or ""
-                    cartorio = f"DNE {inst} ({cur})" if cur else f"DNE {inst}"
-                elif "FUNCIONAL" in doc_type_upper or "MILITAR" in doc_type_upper:
-                    org = dados.get("orgao_emissor") or "Órgão"
-                    reg = dados.get("numero_registro") or dados.get("posto_graduacao_cargo")
-                    cartorio = f"{org} ({reg})" if reg else org
-                elif "CERTIFICADO" in doc_type_upper or "DIPLOMA" in doc_type_upper:
-                    inst = dados.get("instituicao_ensino") or "Inst."
-                    cur = dados.get("curso")
-                    cartorio = f"{inst} - {cur}" if cur else inst
-            cartorio = cartorio or "-"
+            mae = str(pais[1] if len(pais) > 1 else (pais[0] if len(pais) == 1 else "-")).upper()
+            pai = str(pais[0] if len(pais) > 1 else "-").upper()
+            cartorio = _compute_registro_summary(dados, row.get("document_type", ""))
             
+            # Coluna 0 = botão Excluir | Coluna 1 = Enumeração de ordem (1, 2, 3...)
             data_items = [
-                str(row["id"]), row["original_name"], row["document_type"],
+                "", str(idx + 1), str(row["original_name"]), str(row["document_type"]).upper(),
                 nome, cpf, rg, nasc, mae, pai, cartorio
             ]
             
             self.table_data.insertRow(idx)
             for col_idx, val in enumerate(data_items):
                 cell = QTableWidgetItem(str(val))
-                # ID, Arquivo e Tipo ficam bloqueados contra edição in-place
-                if col_idx in [0, 1, 2]:
+                if col_idx == 1:
+                    cell.setTextAlignment(Qt.AlignCenter)
+                    cell.setData(Qt.UserRole, row["id"])
+                # Botão Excluir, Nº, Arquivo e Tipo ficam bloqueados contra edição in-place
+                if col_idx in [0, 1, 2, 3]:
                     cell.setFlags(cell.flags() & ~Qt.ItemIsEditable)
                 self.table_data.setItem(idx, col_idx, cell)
+
+            # [Opus - UI Cleanup]: Botão Excluir posicionado antes da enumeração (Coluna 0)
+            btn_container = QWidget(self.table_data)
+            btn_layout = QHBoxLayout(btn_container)
+            btn_layout.setContentsMargins(4, 2, 4, 2)
+            btn_layout.setAlignment(Qt.AlignCenter)
+            btn_del = PushButton("🗑️", btn_container)
+            btn_del.setFixedSize(28, 26)
+            btn_del.setCursor(Qt.PointingHandCursor)
+            btn_del.setToolTip(f"Excluir documento #{idx + 1} ({row.get('original_name', '')})")
+            btn_del.clicked.connect(lambda checked=False, r=row: self._confirm_delete_document(r))
+            btn_layout.addWidget(btn_del)
+            self.table_data.setCellWidget(idx, 0, btn_container)
                 
         # Ajusta larguras de colunas de forma balanceada
         self._apply_smart_column_widths()
         self.table_data.blockSignals(False)
 
-    def _render_document_cards(self, extractions: List[Dict[str, Any]]):
-        """Renderiza visualmente os documentos anexados como chips/cartões elegantes."""
-        self._doc_chip_widgets.clear()
-
-        # Limpa widgets e espaçadores com segurança máxima
-        while self.docs_layout.count() > 0:
-            item = self.docs_layout.takeAt(0)
-            if item and item.widget():
-                w = item.widget()
-                w.setParent(None)
-                w.deleteLater()
-                
+        # Seleciona automaticamente o primeiro documento da lista ou mantém o ativo na prévia
         if not extractions:
             self._active_doc_id = None
-            empty_lbl = BodyLabel("Nenhum documento anexado ainda. Clique em '📥 Retomar Sessão' para adicionar arquivos.", self.docs_container)
-            empty_lbl.setStyleSheet("color: #888; font-style: italic;")
-            self.docs_layout.addWidget(empty_lbl)
-            self.docs_layout.addStretch(1)
             self.preview_widget.clear_document()
             return
 
-        for row in extractions:
-            doc_id = row["id"]
-            card = CardWidget(self.docs_container)
-            card.setCursor(Qt.PointingHandCursor)
-            card.setToolTip("Clique para visualizar este documento na prévia")
-
-            c_layout = QVBoxLayout(card)
-            c_layout.setContentsMargins(10, 6, 10, 6)
-            c_layout.setSpacing(3)
-            
-            # Linha superior: Tipo e Ações
-            top_line = QHBoxLayout()
-            doc_type = row.get("document_type", "DOC")
-            type_lbl = BodyLabel(f"📄 <b>{doc_type}</b>", card)
-            top_line.addWidget(type_lbl)
-            top_line.addStretch(1)
-            
-            btn_ficha = PushButton("👁️", card)
-            btn_ficha.setFixedSize(24, 24)
-            btn_ficha.setToolTip("Ver Ficha Completa e JSON")
-            btn_ficha.clicked.connect(lambda checked=False, r=row: self._open_document_details(r))
-            top_line.addWidget(btn_ficha)
-            
-            btn_del = PushButton("🗑️", card)
-            btn_del.setFixedSize(24, 24)
-            btn_del.setToolTip("Excluir este documento da sessão")
-            btn_del.clicked.connect(lambda checked=False, r=row: self._confirm_delete_document(r))
-            top_line.addWidget(btn_del)
-            c_layout.addLayout(top_line)
-            
-            # Linha intermediária: Nome do arquivo encurtado
-            orig_name = row.get("original_name", "")
-            short_name = orig_name if len(orig_name) <= 24 else orig_name[:21] + "..."
-            name_lbl = BodyLabel(short_name, card)
-            name_lbl.setToolTip(orig_name)
-            c_layout.addWidget(name_lbl)
-            
-            # Linha inferior: Data/Hora no formato estrito HH/MM - DD/MM/AA
-            created_str = format_datetime_br(row.get("created_at"))
-            date_lbl = BodyLabel(f"🕒 {created_str}", card)
-            date_lbl.setStyleSheet("color: #888; font-size: 11px;")
-            c_layout.addWidget(date_lbl)
-            
-            # Clique no chip seleciona e abre na prévia
-            card.mousePressEvent = lambda event, r=row: self.select_document(r)
-
-            self._doc_chip_widgets[doc_id] = card
-            self.docs_layout.addWidget(card)
-            
-        self.docs_layout.addStretch(1)
-
-        # Seleciona automaticamente o primeiro documento da lista ou mantém o ativo
         target_doc = None
         if self._active_doc_id:
             for r in extractions:
                 if r["id"] == self._active_doc_id:
                     target_doc = r
                     break
-        if not target_doc and extractions:
+        if not target_doc:
             target_doc = extractions[0]
 
         if target_doc:
             self.select_document(target_doc, update_table_selection=True)
-        else:
-            self.preview_widget.clear_document()
 
     def select_document(self, row: Dict[str, Any], update_table_selection: bool = True):
-        """Seleciona o documento ativo, destaca visualmente o chip e renderiza na prévia."""
+        """Seleciona o documento ativo e renderiza na prévia."""
         doc_id = row.get("id")
         self._active_doc_id = doc_id
-
-        # Atualiza o estilo visual dos chips destacando o selecionado
-        for chip_id, chip_widget in self._doc_chip_widgets.items():
-            if chip_id == doc_id:
-                chip_widget.setStyleSheet(
-                    "CardWidget { border: 2px solid #009faa; background-color: rgba(0, 159, 170, 0.12); border-radius: 8px; }"
-                )
-            else:
-                chip_widget.setStyleSheet("")
 
         # Carrega o arquivo no visualizador
         self.preview_widget.load_document(
@@ -1286,31 +1243,23 @@ class SessionsPage(QWidget):
         # Se solicitado, seleciona a linha correspondente na tabela
         if update_table_selection:
             for r_idx in range(self.table_data.rowCount()):
-                item = self.table_data.item(r_idx, 0)
-                if item and item.text() == str(doc_id):
+                item = self.table_data.item(r_idx, 1)
+                if item and item.data(Qt.UserRole) == doc_id:
                     self.table_data.blockSignals(True)
                     self.table_data.selectRow(r_idx)
                     self.table_data.blockSignals(False)
                     break
 
     def _on_table_selection_changed(self):
-        """Sincroniza a seleção da tabela com o visualizador e os chips."""
+        """Sincroniza a seleção da tabela com o visualizador de prévia."""
         current_row = self.table_data.currentRow()
-        if current_row < 0:
+        if current_row < 0 or current_row >= len(self._current_extractions):
             return
-        item = self.table_data.item(current_row, 0)
-        if not item:
+        row = self._current_extractions[current_row]
+        doc_id = row.get("id")
+        if doc_id == self._active_doc_id:
             return
-        try:
-            doc_id = int(item.text())
-            if doc_id == self._active_doc_id:
-                return
-            for r in self._current_extractions:
-                if r.get("id") == doc_id:
-                    self.select_document(r, update_table_selection=False)
-                    break
-        except ValueError:
-            pass
+        self.select_document(row, update_table_selection=False)
 
     def toggle_preview_visibility(self):
         """Oculta ou exibe o visualizador de prévia do documento."""
@@ -1320,14 +1269,17 @@ class SessionsPage(QWidget):
             self.btn_toggle_preview.setText("👁️ Mostrar Prévia")
         else:
             self.btn_toggle_preview.setText("👁️ Ocultar Prévia")
-            self.right_splitter.setSizes([380, 260])
+            self.right_splitter.setSizes([440, 300])
 
     def _apply_smart_column_widths(self):
         """Ajusta as larguras para visualização confortável em janela sem estourar limites."""
         self.table_data.resizeColumnsToContents()
-        # Garante larguras mínimas confortáveis
-        min_widths = [60, 160, 100, 180, 120, 110, 95, 160, 160, 140]
+        # Garante larguras mínimas confortáveis (Col 0 = Excluir, Col 1 = Nº, ...)
+        self.table_data.setColumnWidth(0, 44)
+        min_widths = [44, 48, 160, 100, 180, 120, 110, 95, 160, 160, 140]
         for col, min_w in enumerate(min_widths):
+            if col == 0:
+                continue
             if col < self.table_data.columnCount():
                 current_w = self.table_data.columnWidth(col)
                 self.table_data.setColumnWidth(col, max(current_w, min_w))
@@ -1392,6 +1344,17 @@ class SessionsPage(QWidget):
         self.resume_session_requested.emit(self.current_session_id)
 
     # --- Ações de Documento e Dados ---
+    def view_selected_document_details(self):
+        """Abre a Ficha Completa do documento selecionado na tabela."""
+        row_idx = self.table_data.currentRow()
+        if row_idx < 0 or row_idx >= len(self._current_extractions):
+            if self._current_extractions:
+                row_idx = 0
+            else:
+                InfoBar.warning("Atenção", "Selecione um documento na tabela primeiro.", parent=self)
+                return
+        self._open_document_details(self._current_extractions[row_idx])
+
     def _open_document_details(self, row: Dict[str, Any]):
         """Abre a modal de Ficha Completa a partir do registro do documento."""
         self.select_document(row)
@@ -1457,6 +1420,7 @@ class SessionsPage(QWidget):
             doc_id=doc_id,
             file_name=row["original_name"],
             dados=dados,
+            doc_type=row.get("document_type", ""),
             parent=self
         )
         if dialog.exec():
@@ -1466,7 +1430,15 @@ class SessionsPage(QWidget):
             InfoBar.success("Dados Salvos", f"Informações do documento #{doc_id} atualizadas!", duration=2500, parent=self)
 
     def save_table_changes(self):
-        """Persiste as edições feitas diretamente nas células da tabela no SQLite."""
+        """
+        Persiste as edições feitas diretamente nas células da tabela no SQLite.
+        # [Opus - Security Audit (Item 7 & Item 8)]:
+        # 1. Desmascara o payload completo (token_map) ANTES de salvar, impedindo que tokens
+        #    em campos secundários (imovel, conjuges[1], vendedores, etc.) fiquem congelados sem mapa.
+        # 2. Sincroniza edições da pessoa principal com conjuges[0], compradores[0] e contribuinte.
+        # 3. Não sobrescreve dados["cartorio"] com strings sintéticas geradas para exibição (ex: 'SUS CNS: ...').
+        # 4. Converte valores editados para LETRAS MAIÚSCULAS.
+        """
         if not self._current_extractions:
             return
             
@@ -1477,40 +1449,48 @@ class SessionsPage(QWidget):
                 
             rec = self._current_extractions[row_idx]
             doc_id = rec["id"]
+            doc_type = rec.get("document_type", "")
             
-            # Lê valores editados na tabela
-            nome = self.table_data.item(row_idx, 3).text().strip()
-            cpf = self.table_data.item(row_idx, 4).text().strip()
-            rg = self.table_data.item(row_idx, 5).text().strip()
-            nasc = self.table_data.item(row_idx, 6).text().strip()
-            mae = self.table_data.item(row_idx, 7).text().strip()
-            pai = self.table_data.item(row_idx, 8).text().strip()
-            cartorio = self.table_data.item(row_idx, 9).text().strip()
+            # Lê valores editados na tabela (em LETRAS MAIÚSCULAS; Col 0 = Excluir, Col 1 = Nº, Col 2 = Arquivo, Col 3 = Tipo)
+            nome = self.table_data.item(row_idx, 4).text().strip().upper()
+            cpf = self.table_data.item(row_idx, 5).text().strip().upper()
+            rg = self.table_data.item(row_idx, 6).text().strip().upper()
+            nasc = self.table_data.item(row_idx, 7).text().strip().upper()
+            mae = self.table_data.item(row_idx, 8).text().strip().upper()
+            pai = self.table_data.item(row_idx, 9).text().strip().upper()
+            cartorio = self.table_data.item(row_idx, 10).text().strip().upper()
             
-            # Carrega dados existentes
+            # Carrega dados existentes e desmascara integralmente antes de atualizar
             raw_json = rec.get("extracted_data_json", "{}")
             try:
                 payload = json.loads(raw_json)
                 dados = payload.get("dados", {})
+                token_map = payload.get("token_map", {})
+                if token_map:
+                    dados = self.masker.demask_dict(dados, token_map)
             except Exception:
                 dados = {}
                 
-            if "pessoa" not in dados or not isinstance(dados["pessoa"], dict):
-                dados["pessoa"] = {}
+            # Verifica qual era o resumo sintético antes de salvar para não poluir dados["cartorio"]
+            synthetic_summary = _compute_registro_summary(dados, doc_type)
                 
-            dados["pessoa"]["nome_completo"] = nome
-            dados["pessoa"]["cpf"] = cpf
-            dados["pessoa"]["rg"] = rg
-            dados["pessoa"]["data_nascimento"] = nasc
-            
             pais = []
             if pai and pai != "-":
                 pais.append(pai)
             if mae and mae != "-":
                 pais.append(mae)
-            dados["pessoa"]["nome_pais"] = pais
+
+            person_fields = {
+                "nome_completo": "" if nome == "-" else nome,
+                "cpf": "" if cpf == "-" else cpf,
+                "rg": "" if rg == "-" else rg,
+                "data_nascimento": "" if nasc == "-" else nasc,
+                "nome_pais": pais,
+            }
+            _update_primary_person(dados, person_fields, doc_type)
             
-            if cartorio and cartorio != "-":
+            # Só grava em dados["cartorio"] se o usuário realmente editou a célula ou se já era cartório real
+            if cartorio and cartorio != "-" and cartorio != synthetic_summary:
                 dados["cartorio"] = cartorio
                 
             self.db.update_extraction_data(doc_id, dados)

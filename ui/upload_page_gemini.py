@@ -108,8 +108,9 @@ class ExtractWorker(QThread):
                 pct = 60 + int(35 * (idx - 1) / len(segments))
                 self.progress.emit(pct, f"Enviando documento {idx}/{len(segments)} para a IA (Gemini)...")
                 seg_text = "\n\n".join(masked_pages[a - 1:b])
-                # Somente os tokens que realmente aparecem neste trecho
-                seg_token_map = {t: v for t, v in full_token_map.items() if t in seg_text}
+                # [Opus - Security Audit (Item 8)]: Filtro case-insensitive para tokens presentes neste segmento
+                seg_text_upper = seg_text.upper()
+                seg_token_map = {t: v for t, v in full_token_map.items() if t.upper() in seg_text_upper}
                 pages_label = f"p.{a}" if a == b else f"p.{a}-{b}"
                 try:
                     extracted_doc = extractor.extract_structured_data(seg_text)
