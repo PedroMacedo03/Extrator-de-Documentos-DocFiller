@@ -35,7 +35,15 @@ class AppState:
                 with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     if "tesseract_path" in data and data["tesseract_path"]:
-                        cls.TESSERACT_PATH = str(data["tesseract_path"]).strip()
+                        saved_path = str(data["tesseract_path"]).strip()
+                        # Só preserva o caminho salvo se ele apontar para um arquivo existente;
+                        # caso contrário, garante o Tesseract integrado do pacote.
+                        if Path(saved_path).is_file():
+                            cls.TESSERACT_PATH = saved_path
+                        else:
+                            cls.TESSERACT_PATH = get_default_tesseract_path()
+                    else:
+                        cls.TESSERACT_PATH = get_default_tesseract_path()
                     if "gemini_model" in data and data["gemini_model"]:
                         cls.GEMINI_MODEL = str(data["gemini_model"]).strip()
                     if "headless_mode" in data:
@@ -67,6 +75,13 @@ class AppState:
         """Atualiza o caminho e salva imediatamente no disco."""
         cls.TESSERACT_PATH = path.strip()
         cls.save_settings()
+
+    @classmethod
+    def restore_bundled_tesseract(cls) -> str:
+        """Restaura o caminho do Tesseract para o executável integrado no pacote."""
+        cls.TESSERACT_PATH = get_default_tesseract_path()
+        cls.save_settings()
+        return cls.TESSERACT_PATH
 
     # [Opus - v1.0 Prep]: New method to persist API key changes immediately
     @classmethod

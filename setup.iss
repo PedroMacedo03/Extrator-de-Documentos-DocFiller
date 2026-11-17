@@ -1,6 +1,6 @@
-; Script Inno Setup para DocFiller v1.1.0
+; Script Inno Setup para DocFiller v1.1.1
 #define MyAppName "DocFiller"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.1.1"
 #define MyAppPublisher "DocFiller Team"
 #define MyAppExeName "DocFiller.exe"
 

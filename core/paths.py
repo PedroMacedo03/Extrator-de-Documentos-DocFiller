@@ -48,46 +48,59 @@ def get_bundled_tesseract_dir() -> Path:
     """Retorna o diretório onde o Tesseract portátil está localizado."""
     # 1. Pasta 'tesseract' ao lado do executável ou em _internal (PyInstaller 6.x)
     tess_internal = APP_DIR / "_internal" / "tesseract"
-    if tess_internal.exists():
+    if (tess_internal / "tesseract.exe").is_file():
         return tess_internal
     tess_app = APP_DIR / "tesseract"
-    if tess_app.exists():
+    if (tess_app / "tesseract.exe").is_file():
         return tess_app
     # 2. Pasta temporária do PyInstaller se houver (_MEIPASS)
     tess_bundle = BUNDLE_DIR / "tesseract"
-    if tess_bundle.exists():
+    if (tess_bundle / "tesseract.exe").is_file():
         return tess_bundle
     # 3. Pasta 'bin/tesseract' no ambiente de desenvolvimento
     tess_bin = APP_DIR / "bin" / "tesseract"
-    if tess_bin.exists():
+    if (tess_bin / "tesseract.exe").is_file():
         return tess_bin
-    return tess_app
+    return tess_internal
+
+def is_bundled_tesseract(tesseract_exe_path: str = "") -> bool:
+    """Verifica se o caminho fornecido (ou padrão) corresponde ao Tesseract embutido."""
+    bundled_dir = get_bundled_tesseract_dir()
+    bundled_exe = bundled_dir / "tesseract.exe"
+    if not bundled_exe.is_file():
+        return False
+    if not tesseract_exe_path:
+        return True
+    try:
+        return Path(tesseract_exe_path).resolve() == bundled_exe.resolve()
+    except Exception:
+        return False
 
 def get_default_tesseract_path() -> str:
     """
-    Detecta automaticamente o executável do Tesseract seguindo a ordem:
-    1. Tesseract embutido na pasta do aplicativo (distribuição portátil)
+    Detecta automaticamente o executável do Tesseract seguindo a ordem de prioridade:
+    1. Tesseract embutido na pasta do aplicativo (distribuição portátil/integrada)
     2. C:\\Program Files\\Tesseract-OCR\\tesseract.exe (instalador padrão UB-Mannheim)
     3. C:\\Program Files\\tesseract.exe
     4. Comando no PATH do sistema operacional
     """
     bundled_exe = get_bundled_tesseract_dir() / "tesseract.exe"
-    if bundled_exe.exists():
+    if bundled_exe.is_file():
         return str(bundled_exe)
 
     std_ub = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
-    if std_ub.exists():
+    if std_ub.is_file():
         return str(std_ub)
 
     std_root = Path(r"C:\Program Files\tesseract.exe")
-    if std_root.exists():
+    if std_root.is_file():
         return str(std_root)
 
     path_cmd = shutil.which("tesseract")
     if path_cmd:
         return path_cmd
 
-    return str(std_ub)
+    return str(bundled_exe)
 
 def get_tessdata_prefix(tesseract_exe_path: str = "") -> str:
     """Retorna o caminho para a pasta tessdata correspondente ao tesseract."""

@@ -45,6 +45,13 @@ class HybridOCR:
         from core.paths import get_default_tesseract_path, get_tessdata_prefix
         chosen_cmd = tesseract_cmd or get_default_tesseract_path()
 
+        # Validação de resiliência: se o caminho configurado não existir em disco,
+        # faz fallback automático para o Tesseract integrado no pacote
+        if not chosen_cmd or not os.path.isfile(chosen_cmd):
+            fallback_cmd = get_default_tesseract_path()
+            if os.path.isfile(fallback_cmd):
+                chosen_cmd = fallback_cmd
+
         if chosen_cmd and pytesseract is not None:
             if os.path.exists(chosen_cmd):
                 pytesseract.pytesseract.tesseract_cmd = chosen_cmd
